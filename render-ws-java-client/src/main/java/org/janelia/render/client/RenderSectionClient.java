@@ -32,7 +32,6 @@ public class RenderSectionClient {
     private static class Parameters extends RenderDataClientParameters {
 
         // NOTE: --baseDataUrl, --owner, and --project parameters defined in RenderDataClientParameters
-return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
         @Parameter(names = "--stack", description = "Stack name", required = true)
         private String stack;
 
@@ -45,7 +44,7 @@ return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
         @Parameter(names = "--format", description = "Format for rendered boxes", required = false)
         private String format = Utils.PNG_FORMAT;
 
-        @Parameter(names = "-return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());-doFilter", description = "Use ad hoc filter to support alignment", required = false, arity = 1)
+        @Parameter(names = "--doFilter", description = "Use ad hoc filter to support alignment", required = false, arity = 1)
         private boolean doFilter = true;
 
         @Parameter(names = "--fillWithNoise", description = "Fill image with noise before rendering to improve point match derivation", required = false, arity = 1)
@@ -102,20 +101,22 @@ return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
 
         Path projectPath = Paths.get(clientParameters.rootDirectory, clientParameters.project).toAbsolutePath();
         Path sectionPath;
-
+        /*
         if(clientParameters.customOutPutFolder.length() > 0)
         {
+            //FIXME I do not think this is in the version....  AT?
             projectPath = Paths.get(clientParameters.rootDirectory, clientParameters.customOutPutFolder, clientParameters.channelName).toAbsolutePath();
             this.sectionDirectory = projectPath.toFile();
         }
-        else
-        {
+        */
+        //else
+        //{
         	final String sectionsAtScaleName = "sections_at_" + clientParameters.scale;
         	sectionPath = Paths.get(projectPath.toString(),
                                            clientParameters.stack,
                                            sectionsAtScaleName).toAbsolutePath();
             this.sectionDirectory = sectionPath.toFile();
-        }
+        //}
 
         ensureWritableDirectory(this.sectionDirectory);
 
@@ -137,7 +138,7 @@ return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
         final Bounds layerBounds = renderDataClient.getLayerBounds(clientParameters.stack, z);
 
         String parametersUrl;
-        if(clientParameters.bounds != null && clientParameters.bounds().size == 4) //Read bounds from supplied parameters
+        if(clientParameters.bounds != null && clientParameters.bounds.size() == 4) //Read bounds from supplied parameters
         {
             LOG.debug("Using user bounds");
             parametersUrl =
@@ -187,9 +188,11 @@ return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
 
     private File getSectionFile(final Double z) {
 
-        String fName = (clientParamters.padFileNameWithZeroes) ? String.format("%05d", z.intValue()) : z.floatValue();
-
-        String secDir;
+        Integer zint = new Integer(z.intValue());
+        String s = String.format("%05d", zint );
+        String fName = s;
+        //String fName = (clientParameters.padFileNameWithZeroes) ? String.format("%05d", zint ) : z.floatValue();
+        File secDir;
 
         if(clientParameters.customOutPutFolder.length() < 1)
         {
@@ -208,7 +211,7 @@ return new File(hundredsDir, z + "." + clientParameters.format.toLowerCase());
 
         ensureWritableDirectory(secDir);
 
-        return new File(secDir, fName + "." + clientParameters.format.toLowerCase());
+        return new File(secDir.getAbsolutePath(), fName + "." + clientParameters.format.toLowerCase());
      }
 
     private void ensureWritableDirectory(final File directory) {
