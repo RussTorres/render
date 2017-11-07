@@ -269,6 +269,7 @@ public class StackMetaDataService {
                                       @PathParam("toStack") final String toStack,
                                       @QueryParam("z") final List<Double> zValues,
                                       @QueryParam("toProject") String toProject,
+                                      @QueryParam("toOwner") String toOwner,
                                       @QueryParam("skipTransforms") final Boolean skipTransforms,
                                       @Context final UriInfo uriInfo,
                                       final StackVersion stackVersion) {
@@ -285,8 +286,12 @@ public class StackMetaDataService {
                 toProject = fromProject;
             }
 
+            if (toOwner == null) {
+              toOwner = owner;
+            }
+
             final StackMetaData fromStackMetaData = getStackMetaData(owner, fromProject, fromStack);
-            final StackId toStackId = new StackId(owner, toProject, toStack);
+            final StackId toStackId = new StackId(toOwner, toProject, toStack);
 
             StackMetaData toStackMetaData = renderDao.getStackMetaData(toStackId);
 
