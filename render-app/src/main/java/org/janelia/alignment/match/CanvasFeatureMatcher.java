@@ -34,6 +34,9 @@ public class CanvasFeatureMatcher implements Serializable {
     private final Integer maxNumInliers;
     private final boolean filterMatches;
 
+    private final boolean multipleHypotheses;
+    private final boolean widestSetOnly;
+
     /**
      * Sets up everything that is needed to derive point matches from the feature lists of two canvases.
      *
@@ -47,6 +50,8 @@ public class CanvasFeatureMatcher implements Serializable {
      * @param  maxTrust        reject candidates with a cost larger than maxTrust * median cost (e.g. 3).
      * @param  maxNumInliers   (optional) maximum number of inliers for matches; null indicates no maximum.
      * @param  filterMatches   indicates whether matches should be filtered.
+     * @param  multipleHypotheses whether multiple rounds of consensus filtering should be run
+     * @param  widestSetOnly   whether only the widest set of multiple hypotheses should be considered inliers
      */
     public CanvasFeatureMatcher(final float rod,
                                 final ModelType modelType,
@@ -67,6 +72,38 @@ public class CanvasFeatureMatcher implements Serializable {
         this.maxTrust = maxTrust;
         this.maxNumInliers = maxNumInliers;
         this.filterMatches = filterMatches;
+
+        this.multipleHypotheses = false;
+        this.widestSetOnly = false;
+    }
+
+    public CanvasFeatureMatcher(final float rod,
+                                final ModelType modelType,
+                                final int iterations,
+                                final float maxEpsilon,
+                                final float minInlierRatio,
+                                final int minNumInliers,
+                                final double maxTrust,
+                                final Integer maxNumInliers,
+                                final boolean filterMatches,
+                                final boolean multipleHypotheses,
+                                final boolean widestSetOnly) {
+
+        this.rod = rod;
+
+        this.modelType = modelType;
+        this.iterations = iterations;
+        this.maxEpsilon = maxEpsilon;
+        this.minInlierRatio = minInlierRatio;
+        this.minNumInliers = minNumInliers;
+        this.maxTrust = maxTrust;
+        this.maxNumInliers = maxNumInliers;
+        this.filterMatches = filterMatches;
+        this.multipleHypotheses = multipleHypotheses;
+        this.widestSetOnly = widestSetOnly;
+
+        if (multipleHypotheses && maxNumInliers != null)
+          LOG.warn("specifying maxNumInliers while drawing from multipleHypotheses may produce a subset of pointmatches fitting inconsistent models.")
     }
 
     public boolean isFilterMatches() {
@@ -123,8 +160,36 @@ public class CanvasFeatureMatcher implements Serializable {
 
         final ArrayList<PointMatch> inliers = new ArrayList<>(candidates.size());
 
+        boolean again = false;
+        int nHypotheses = 0;
+        double maxWidth = 0;
+
         if (candidates.size() > 0) {
-            try {
+          try {
+                do {
+                  again = false;
+                  final ArrayList<PointMatch> hypothesisInliers = new ArrayList<PointMatch>();
+                  final boolean modelFound = model.filterRansac(
+                    candidates, hypothesisInliers, iterations, maxEpsilon,
+                    minInlierRatio, minNumInliers, maxTrust);
+                  if (modelFound) {
+                    candidates.removeAll(hypothesisInliers);
+                    // TODO reject identity?
+                    ++nHypotheses;
+                    if (widestSetOnly) {
+                      final double width = squareP1LocalWidth(
+                        hypothesisInliers);
+                      if (width > maxWidth){
+                        maxWidth = width;
+                        inliers.clear();
+                        inliers.addAll(hypothesisInliers);
+                      }
+                    }
+                    else
+                      inliers.addAll(hypothesisInliers);
+                    again = (multipleHypotheses | widestSetOnly);
+                  }
+                } while (again);
                 model.filterRansac(candidates,
                                    inliers,
                                    iterations,
@@ -133,7 +198,8 @@ public class CanvasFeatureMatcher implements Serializable {
                                    minNumInliers,
                                    maxTrust);
             } catch (final NotEnoughDataPointsException e) {
-                LOG.warn("failed to filter outliers", e);
+                if (!(multipleHypotheses | widestSetOnly) &&  nHypotheses < 1)
+                    LOG.warn("failed to filter outliers", e);
             }
 
             if ((maxNumInliers != null) && (maxNumInliers > 0) && (inliers.size() > maxNumInliers)) {
