@@ -2,8 +2,13 @@ package org.janelia.alignment.protocol.s3;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
+import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.google.common.net.MediaType;
@@ -16,7 +21,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 import javax.imageio.ImageIO;
 
@@ -31,10 +38,21 @@ import org.slf4j.LoggerFactory;
 public class S3Opener extends ij.io.Opener {
 
     private S3Handler handler;
+    private String scheme;
+    private Map<String, String> s3Parameters;
 
     public S3Opener() {
         super();
         this.handler = null;
+        this.scheme = "s3://";
+        this.s3Parameters = new LinkedHashMap<String, String>();
+    }
+
+    public S3Opener(final String scheme, final Map<String, String> s3Parameters) {
+        super();
+        this.handler = null;
+        this.scheme = scheme;
+        this.s3Parameters = s3Parameters;
     }
 
     @Override
@@ -42,7 +60,7 @@ public class S3Opener extends ij.io.Opener {
 
         ImagePlus imagePlus = null;
 
-        if (url.startsWith("s3://")) {
+        if (url.startsWith(this.scheme)) {
 
             String name = "";
             final int index = url.lastIndexOf('/');
@@ -112,9 +130,30 @@ public class S3Opener extends ij.io.Opener {
     private synchronized void buildS3Handler() throws IOException {
         if (handler == null) {
             try {
-                final AWSCredentialsProvider credentialsProvider = new DefaultAWSCredentialsProviderChain();
-                final AmazonS3 s3Client = AmazonS3ClientBuilder.standard().withCredentials(credentialsProvider).build();
-                handler = new S3Handler(s3Client);
+                final AmazonS3ClientBuilder clientBuilder = AmazonS3ClientBuilder.standard();
+
+                if (this.s3Parameters.containsKey("aws_secret_access_key") && this.s3Parameters.containsKey("aws_access_key_id")){
+                    final AWSCredentials credentials = new BasicAWSCredentials(this.s3Parameters.get("aws_access_key_id"), this.s3Parameters.get("aws_secret_access_key"));
+                    final AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(credentials);
+                    clientBuilder.setCredentials(credentialsProvider);
+                } else if (this.s3Parameters.containsKey("profile_name")) {
+                    final AWSCredentialsProvider credentialsProvider = new ProfileCredentialsProvider(this.s3Parameters.get("profile_name"));
+                    clientBuilder.setCredentials(credentialsProvider);
+                } else {
+                    final AWSCredentialsProvider credentialsProvider = new DefaultAWSCredentialsProviderChain();
+                    clientBuilder.setCredentials(credentialsProvider);
+                }
+
+                String region = (String) this.s3Parameters.getOrDefault("region_name", clientBuilder.getRegion());
+                if (this.s3Parameters.containsKey("endpoint_url")) {
+                    final EndpointConfiguration endpointConfig = new EndpointConfiguration(this.s3Parameters.get("endpoint_url"), region);
+                    final AmazonS3 s3Client = clientBuilder.withEndpointConfiguration(endpointConfig).build();
+                    handler = new S3Handler(s3Client);
+                } else {
+                    final AmazonS3 s3Client = clientBuilder.withRegion(region).build();
+                    handler = new S3Handler(s3Client);
+                }
+
             } catch (final AmazonServiceException ase) {
                 throw new IOException("Amazon S3 service failure for error type " + ase.getErrorType(), ase);
             } catch (final AmazonClientException ace) {
