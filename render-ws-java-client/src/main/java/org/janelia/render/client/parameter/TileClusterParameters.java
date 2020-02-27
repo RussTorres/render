@@ -3,18 +3,8 @@ package org.janelia.render.client.parameter;
 import com.beust.jcommander.Parameter;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
-import org.janelia.alignment.match.CanvasMatches;
 import org.janelia.render.client.RenderDataClient;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Parameters and methods for determining clusters of connected tiles within a layer.
@@ -48,10 +38,21 @@ public class TileClusterParameters
                           "This value will be ignored if --maxSmallClusterSize is specified.")
     public Double smallClusterFactor;
 
-    public void validate()
+    @Parameter(
+            names = "--includeMatchesOutsideGroup",
+            description = "When determining connected clusters, include outside group matches (e.g. for merged reacquired sections)",
+            arity = 0)
+    public boolean includeMatchesOutsideGroup = false;
+
+
+    public void validate() {
+        validate(false);
+    }
+
+    public void validate(final boolean isRequired)
             throws IllegalArgumentException {
 
-        if (isDefined()) {
+        if (isRequired || isDefined()) {
 
             if (matchCollection == null) {
                 throw new IllegalArgumentException(
@@ -89,66 +90,5 @@ public class TileClusterParameters
         }
         return client;
     }
-
-    public static List<Set<String>> buildAndSortConnectedTileSets(final Double z,
-                                                                  final List<CanvasMatches> matchesList) {
-
-        final Map<String, Set<String>> connectionsMap = new HashMap<>();
-
-        Set<String> pSet;
-        Set<String> qSet;
-
-        for (final CanvasMatches matches : matchesList) {
-            final String pId = matches.getpId();
-            final String qId = matches.getqId();
-
-            pSet = connectionsMap.computeIfAbsent(pId, k -> new HashSet<>());
-            pSet.add(qId);
-
-            qSet = connectionsMap.computeIfAbsent(qId, k -> new HashSet<>());
-            qSet.add(pId);
-        }
-
-        final List<Set<String>> connectedTileSets = new ArrayList<>();
-
-        while (connectionsMap.size() > 0) {
-            @SuppressWarnings("OptionalGetWithoutIsPresent")
-            final String tileId = connectionsMap.keySet().stream().findFirst().get();
-            final Set<String> connectedTileSet = new HashSet<>();
-            addConnectedTiles(tileId, connectionsMap, connectedTileSet);
-            connectedTileSets.add(connectedTileSet);
-        }
-
-        connectedTileSets.sort(Comparator.comparingInt(Set::size));
-
-        final List<Integer> connectedSetSizes = new ArrayList<>();
-        connectedTileSets.forEach(tileIds -> connectedSetSizes.add(tileIds.size()));
-
-        LOG.info("buildAndSortConnectedTileSets: for z {}, found {} connected tile sets with sizes {}",
-                 z, connectedTileSets.size(), connectedSetSizes);
-
-        return connectedTileSets;
-    }
-
-    private static void addConnectedTiles(final String tileId,
-                                          final Map<String, Set<String>> connectionsMap,
-                                          final Set<String> connectedTileSet) {
-
-        final boolean isNewConnection = connectedTileSet.add(tileId);
-
-        if (isNewConnection) {
-
-            final Set<String> connectedTileIds = connectionsMap.remove(tileId);
-
-            if (connectedTileIds != null) {
-                for (final String connectedTileId : connectedTileIds) {
-                    addConnectedTiles(connectedTileId, connectionsMap, connectedTileSet);
-                }
-            }
-
-        }
-    }
-
-    private static final Logger LOG = LoggerFactory.getLogger(TileClusterParameters.class);
 
 }

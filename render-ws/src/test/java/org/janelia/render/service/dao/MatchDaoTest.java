@@ -87,6 +87,23 @@ public class MatchDaoTest {
     }
 
     @Test
+    public void testRemoveMatchesWithPGroup() throws Exception {
+
+        dao.removeMatchesWithPGroup(collectionId, groupId);
+
+        final ByteArrayOutputStream outputStream = new ByteArrayOutputStream(1024);
+
+        dao.writeMatchesWithPGroup(collectionId, null, groupId, true, outputStream);
+
+        final List<CanvasMatches> canvasMatchesList = getListFromStream(outputStream);
+
+        Assert.assertEquals("after removal, invalid number of matches with pGroup returned",
+                            0, canvasMatchesList.size());
+
+        outputStream.reset();
+    }
+
+    @Test
     public void testSaveMatches() throws Exception {
 
         final String pId = "save.p";
@@ -312,7 +329,7 @@ public class MatchDaoTest {
 
         final MongoCollection<Document> matchCollection = dao.getExistingCollection(collectionId);
         final Document query = new Document("pGroupId", pGroupId);
-        final List<CanvasMatches> updatedMatchList = dao.getMatches(matchCollection, query);
+        final List<CanvasMatches> updatedMatchList = dao.getMatches(matchCollection, query, false);
 
         Assert.assertEquals("invalid number of matches returned, matches=" + updatedMatchList,
                             3, updatedMatchList.size());

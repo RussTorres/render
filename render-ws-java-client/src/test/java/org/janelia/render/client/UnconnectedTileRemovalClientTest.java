@@ -7,8 +7,8 @@ import java.util.Set;
 
 import org.janelia.alignment.match.CanvasMatches;
 import org.janelia.alignment.match.Matches;
+import org.janelia.alignment.match.SortedConnectedCanvasIdClusters;
 import org.janelia.render.client.parameter.CommandLineParameters;
-import org.janelia.render.client.parameter.TileClusterParameters;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -18,6 +18,23 @@ import org.junit.Test;
  * @author Eric Trautman
  */
 public class UnconnectedTileRemovalClientTest {
+
+    public static void main(final String[] args) {
+
+        final String[] effectiveArgs = (args != null) && (args.length > 0) ? args : new String[] {
+                "--baseDataUrl", "http://renderer-dev.int.janelia.org:8080/render-ws/v1",
+                "--owner", "flyTEM",
+                "--project", "FAFB_montage",
+                "--stack", "v15_montage_check_1503",
+                "--z", "1503",
+                "--matchCollection", "FAFB_montage_fix",
+                "--maxSmallClusterSize", "1",
+                "--reportRemovedTiles"
+        };
+
+        UnconnectedTileRemovalClient.main(effectiveArgs);
+
+    }
 
     @Test
     public void testParameterParsing() throws Exception {
@@ -59,12 +76,17 @@ public class UnconnectedTileRemovalClientTest {
         final UnconnectedTileRemovalClient.Parameters parameters = new UnconnectedTileRemovalClient.Parameters();
         parameters.tileCluster.smallClusterFactor = 0.5; // should result in maxSmallClusterSize of 4 (0.5 * 8)
 
-        final UnconnectedTileRemovalClient client = new UnconnectedTileRemovalClient(parameters);
         final Double z = 99.0;
-        final List<Set<String>> sortedConnectedTileSets =
-                TileClusterParameters.buildAndSortConnectedTileSets(z, matchesList);
-        final int firstRemainingSetIndex =
-                client.markSmallClustersAsUnconnected(z, sortedConnectedTileSets, unconnectedTileIds);
+        final SortedConnectedCanvasIdClusters clusters = new SortedConnectedCanvasIdClusters(matchesList);
+        final List<Set<String>> sortedConnectedTileSets = clusters.getSortedConnectedTileIdSets();
+
+        final Set<String> keeperTileIds = new HashSet<>();
+        List<Set<String>> smallerRemainingClusters =
+                UnconnectedTileRemovalClient.markSmallClustersAsUnconnected(parameters.tileCluster,
+                                                                            z,
+                                                                            sortedConnectedTileSets,
+                                                                            keeperTileIds,
+                                                                            unconnectedTileIds);
 
         final String[] expectedUnconnectedTiles = {"I", "J", "K", "L", "M", "N", "O", "P", "X", "Y"};
         Assert.assertEquals("invalid number of small cluster tiles found ",
@@ -75,8 +97,22 @@ public class UnconnectedTileRemovalClientTest {
                               unconnectedTileIds.contains(tileId));
         }
 
-        Assert.assertEquals("invalid firstRemainingSetIndex returned",
-                            4, firstRemainingSetIndex);
+        Assert.assertEquals("invalid number of smaller remaining clusters returned",
+                            1, smallerRemainingClusters.size());
+
+        // all-inclusive test
+        parameters.tileCluster.maxSmallClusterSize = 1;
+
+        smallerRemainingClusters =
+                UnconnectedTileRemovalClient.markSmallClustersAsUnconnected(parameters.tileCluster,
+                                                                            z,
+                                                                            sortedConnectedTileSets,
+                                                                            keeperTileIds,
+                                                                            unconnectedTileIds);
+
+        Assert.assertEquals("all inclusive test: invalid number of smaller remaining clusters returned",
+                            5, smallerRemainingClusters.size());
+
     }
 
 }

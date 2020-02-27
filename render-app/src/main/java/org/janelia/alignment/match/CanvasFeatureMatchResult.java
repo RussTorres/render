@@ -4,11 +4,11 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
+import mpicbg.models.Model;
 import mpicbg.models.Point;
 import mpicbg.models.PointMatch;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.janelia.alignment.match.CanvasFeatureMatcher.FilterType.AGGREGATED_CONSENSUS_SETS;
 
 /**
  * Encapsulates key data elements from canvas feature match derivation.
@@ -17,13 +17,16 @@ import org.slf4j.LoggerFactory;
  */
 public class CanvasFeatureMatchResult implements Serializable {
 
+    private final CanvasFeatureMatcher matcher;
     private final List<List<PointMatch>> consensusSetInliers;
     private final int totalNumberOfInliers;
     private final double inlierRatio;
 
-    public CanvasFeatureMatchResult(final List<List<PointMatch>> consensusSetInliers,
+    public CanvasFeatureMatchResult(final CanvasFeatureMatcher matcher,
+                                    final List<List<PointMatch>> consensusSetInliers,
                                     final int totalNumberOfCandidates) {
 
+        this.matcher = matcher;
         this.consensusSetInliers = consensusSetInliers;
         int totalNumberOfInliers = 0;
         for (final List<PointMatch> setInliers : consensusSetInliers) {
@@ -109,7 +112,6 @@ public class CanvasFeatureMatchResult implements Serializable {
                                        final Double renderScale,
                                        final double[] pOffsets,
                                        final double[] qOffsets,
-                                       final Double pairMaxDeltaStandardDeviation,
                                        final List<CanvasMatches> targetList) {
 
         if (foundMatches()) {
@@ -121,33 +123,31 @@ public class CanvasFeatureMatchResult implements Serializable {
                                                                         renderScale,
                                                                         pOffsets,
                                                                         qOffsets);
-            if (pairMaxDeltaStandardDeviation != null) {
-                inlierList.forEach(canvasMatches -> {
+            targetList.addAll(inlierList);
 
-                    final Matches m = canvasMatches.getMatches();
-                    final double dxStd = m.calculateStandardDeviationForDeltaX();
-                    final double dyStd = m.calculateStandardDeviationForDeltaY();
-                    if (dxStd > pairMaxDeltaStandardDeviation) {
-
-                        LOG.warn("tossing matches between {} and {} because delta X standard deviation of {} is greater than {}",
-                                 canvasMatches.getpId(), canvasMatches.getqId(), dxStd, pairMaxDeltaStandardDeviation);
-
-                    } else if (dyStd > pairMaxDeltaStandardDeviation) {
-
-                        LOG.warn("tossing matches between {} and {} because delta Y standard deviation of {} is greater than {}",
-                                 canvasMatches.getpId(), canvasMatches.getqId(), dyStd, pairMaxDeltaStandardDeviation);
-
-                    } else {
-                        targetList.add(canvasMatches);
-                    }
-
-                });
-
-            } else {
-                targetList.addAll(inlierList);
-            }
         }
 
+    }
+
+    PointMatchQualityStats calculateQualityStats()
+            throws IllegalArgumentException {
+
+        final PointMatchQualityStats qualityStats = new PointMatchQualityStats();
+
+        final Model aggregateModel;
+        if (AGGREGATED_CONSENSUS_SETS.equals(matcher.getFilterType()) || (consensusSetInliers.size() > 1)) {
+            aggregateModel = matcher.getModel();
+        } else {
+            aggregateModel = null;
+        }
+
+        try {
+            qualityStats.calculate(consensusSetInliers, aggregateModel);
+        } catch (final Exception e) {
+            throw new IllegalArgumentException("failed to fit aggregate model for point match quality calculation", e);
+        }
+
+        return qualityStats;
     }
 
     @Override
@@ -190,9 +190,9 @@ public class CanvasFeatureMatchResult implements Serializable {
             double[] local1 = p1.getL();
             final int dimensionCount = local1.length;
 
-            final double p[][] = new double[dimensionCount][pointMatchCount];
-            final double q[][] = new double[dimensionCount][pointMatchCount];
-            final double w[] = new double[pointMatchCount];
+            final double[][] p = new double[dimensionCount][pointMatchCount];
+            final double[][] q = new double[dimensionCount][pointMatchCount];
+            final double[] w = new double[pointMatchCount];
 
             Point p2;
             double[] local2;
@@ -238,21 +238,21 @@ public class CanvasFeatureMatchResult implements Serializable {
      */
     public static List<PointMatch> convertMatchesToPointMatchList(final Matches matches) {
 
-        final double w[] = matches.getWs();
+        final double[] w = matches.getWs();
 
         final int pointMatchCount = w.length;
         final List<PointMatch> pointMatchList = new ArrayList<>(pointMatchCount);
 
         if (pointMatchCount > 0) {
-            final double p[][] = matches.getPs();
-            final double q[][] = matches.getQs();
+            final double[][] p = matches.getPs();
+            final double[][] q = matches.getQs();
 
             final int dimensionCount = p.length;
 
             for (int matchIndex = 0; matchIndex < pointMatchCount; matchIndex++) {
 
-                final double pLocal[] = new double[dimensionCount];
-                final double qLocal[] = new double[dimensionCount];
+                final double[] pLocal = new double[dimensionCount];
+                final double[] qLocal = new double[dimensionCount];
 
                 for (int dimensionIndex = 0; dimensionIndex < dimensionCount; dimensionIndex++) {
                     pLocal[dimensionIndex] = p[dimensionIndex][matchIndex];
@@ -266,5 +266,4 @@ public class CanvasFeatureMatchResult implements Serializable {
         return pointMatchList;
     }
 
-    private static final Logger LOG = LoggerFactory.getLogger(CanvasFeatureMatchResult.class);
 }

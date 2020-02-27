@@ -37,7 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.janelia.render.client.SIFTPointMatchClient.getCanvasFeatureExtractor;
-import static org.janelia.render.client.SIFTPointMatchClient.getCanvasFeatureMatcher;
 
 /**
  * Spark client for generating and storing SIFT point matches for a specified set of canvas (e.g. tile) pairs.
@@ -186,13 +185,12 @@ public class SIFTPointMatchClient
                         featureStorageParameters.requireStoredFeatures);
 
         final double renderScale = featureRenderParameters.renderScale;
-        final Double pairMaxDeltaStandardDeviation = matchDerivationParameters.pairMaxDeltaStandardDeviation;
 
         // broadcast to all nodes
         final Broadcast<Long> broadcastCacheMaxKilobytes = sparkContext.broadcast(cacheMaxKilobytes);
         final Broadcast<CanvasFeatureListLoader> broadcastFeatureLoader = sparkContext.broadcast(featureLoader);
         final Broadcast<CanvasFeatureMatcher> broadcastFeatureMatcher =
-                sparkContext.broadcast(getCanvasFeatureMatcher(matchDerivationParameters));
+                sparkContext.broadcast(new CanvasFeatureMatcher(matchDerivationParameters));
 
         final JavaRDD<OrderedCanvasIdPair> rddCanvasIdPairs =
                 sparkContext.parallelize(renderableCanvasIdPairs.getNeighborPairs());
@@ -244,7 +242,6 @@ public class SIFTPointMatchClient
                                                            renderScale,
                                                            pClipOffsets,
                                                            qClipOffsets,
-                                                           pairMaxDeltaStandardDeviation,
                                                            matchList);
                     }
 

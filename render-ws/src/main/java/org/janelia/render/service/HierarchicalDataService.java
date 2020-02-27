@@ -31,8 +31,11 @@ import org.janelia.alignment.RenderParameters;
 import org.janelia.alignment.match.CanvasMatches;
 import org.janelia.alignment.match.CanvasNameToPointsMap;
 import org.janelia.alignment.match.MatchCollectionId;
+import org.janelia.alignment.match.SortedConnectedCanvasIdClusters;
+import org.janelia.alignment.match.TileIdsWithMatches;
 import org.janelia.alignment.spec.Bounds;
 import org.janelia.alignment.spec.LeafTransformSpec;
+import org.janelia.alignment.spec.TileBounds;
 import org.janelia.alignment.spec.TileSpec;
 import org.janelia.alignment.spec.TransformSpec;
 import org.janelia.alignment.spec.stack.HierarchicalStack;
@@ -73,9 +76,8 @@ public class HierarchicalDataService {
         this(RenderDao.build(), MatchDao.build());
     }
 
-    public HierarchicalDataService(final RenderDao renderDao,
-                                   final MatchDao matchDao)
-            throws UnknownHostException {
+    private HierarchicalDataService(final RenderDao renderDao,
+                                    final MatchDao matchDao) {
         this.renderDao = renderDao;
         this.matchDao = matchDao;
     }
@@ -418,7 +420,7 @@ public class HierarchicalDataService {
                                                               consensusRowCount,
                                                               consensusColumnCount);
                         final List<CanvasMatches> canvasMatchesList =
-                                matchDao.getMatchesOutsideGroup(tierStack.getMatchCollectionId(), groupId);
+                                matchDao.getMatchesOutsideGroup(tierStack.getMatchCollectionId(), groupId, false);
                         final CanvasNameToPointsMap nameToPointsForGroup = new CanvasNameToPointsMap(1 / tierStack.getScale());
                         nameToPointsForGroup.addPointsForGroup(groupId, canvasMatchesList);
 
@@ -518,22 +520,121 @@ public class HierarchicalDataService {
         return response;
     }
 
-    @Path("v1/owner/{owner}/project/{project}/stack/{stack}/residualCalculation")
+    @Path("v1/owner/{owner}/project/{project}/stack/{stack}/z/{z}/clusteredTileBoundsForCollection/{matchCollection}")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(
+            tags = { "Section Data APIs", "Point Match APIs" },
+            value = "Get bounds for each tile with specified z sorted by connected clusters")
+    @ApiResponses(value = {
+            @ApiResponse(code = 404, message = "stack not found")
+    })
+    public List<List<TileBounds>> getClusteredTileBoundsForCollection(@PathParam("owner") final String owner,
+                                                                      @PathParam("project") final String project,
+                                                                      @PathParam("stack") final String stack,
+                                                                      @PathParam("z") final Double z,
+                                                                      @PathParam("matchCollection") final String matchCollection,
+                                                                      @QueryParam("matchOwner") final String matchOwner) {
+
+        LOG.info("getClusteredTileBoundsForCollection: entry, owner={}, project={}, stack={}, z={}, matchCollection={}",
+                 owner, project, stack, z, matchCollection);
+
+        List<List<TileBounds>> result = null;
+
+        try {
+
+            final StackId stackId = new StackId(owner, project, stack);
+            final String effectiveMatchOwner = matchOwner == null ? owner : matchOwner;
+            final MatchCollectionId matchCollectionId =
+                    MatchService.getCollectionId(effectiveMatchOwner, matchCollection);
+
+            final List<TileBounds> allTileBounds = renderDao.getTileBoundsForZ(stackId, z);
+
+            final Set<String> distinctSectionIds = new HashSet<>(allTileBounds.size());
+            final Map<String, TileBounds> tileIdToBoundsMap = new HashMap<>(allTileBounds.size());
+
+            allTileBounds.forEach(tb -> {
+                final String sectionId = tb.getSectionId();
+                if (sectionId != null) {
+                    distinctSectionIds.add(tb.getSectionId());
+                    tileIdToBoundsMap.put(tb.getTileId(), tb);
+                }
+            });
+
+            final Set<String> layerTileIds = tileIdToBoundsMap.keySet();
+            final TileIdsWithMatches tileIdsWithMatches = new TileIdsWithMatches();
+
+            final int numberOfSectionIds = distinctSectionIds.size();
+            if (numberOfSectionIds > 1) {
+                final List<String> sortedSectionIds = distinctSectionIds.stream().sorted().collect(Collectors.toList());
+                for (int i = 0; i < numberOfSectionIds; i++) {
+                    final String pGroupId = sortedSectionIds.get(i);
+                    tileIdsWithMatches.addMatches(matchDao.getMatchesWithinGroup(matchCollectionId,
+                                                                                 pGroupId,
+                                                                                 true),
+                                                  layerTileIds);
+                    for (int j = i + 1; j < numberOfSectionIds; j++) {
+                        final String qGroupId = sortedSectionIds.get(j);
+                        tileIdsWithMatches.addMatches(matchDao.getMatchesBetweenGroups(matchCollectionId,
+                                                                                pGroupId,
+                                                                                qGroupId,
+                                                                                true),
+                                                      layerTileIds);
+                    }
+                }
+            } else {
+                distinctSectionIds.forEach(
+                        sectionId -> tileIdsWithMatches.addMatches(matchDao.getMatchesWithinGroup(matchCollectionId,
+                                                                                             sectionId,
+                                                                                             true),
+                                                                   layerTileIds));
+            }
+
+            final SortedConnectedCanvasIdClusters idClusters =
+                    new SortedConnectedCanvasIdClusters(tileIdsWithMatches.getCanvasMatchesList());
+
+            LOG.info("getClusteredTileBoundsForCollection: for z {}, found {} connected tile sets with sizes {}",
+                     z, idClusters.size(), idClusters.getClusterSizes());
+
+            final List<List<TileBounds>> clusteredBoundsLists = new ArrayList<>(idClusters.size());
+            idClusters.getSortedConnectedTileIdSets().forEach(tileIdSet -> {
+                final List<TileBounds> clusterBoundsList = new ArrayList<>(tileIdSet.size());
+                tileIdSet.forEach(tileId -> {
+                    final TileBounds tileBounds = tileIdToBoundsMap.get(tileId);
+                    if (tileBounds != null) {
+                        clusterBoundsList.add(tileBounds);
+                    }
+                });
+                if (clusterBoundsList.size() > 0) {
+                    clusteredBoundsLists.add(clusterBoundsList);
+                }
+            });
+
+            result = clusteredBoundsLists;
+
+        } catch (final Throwable t) {
+            RenderServiceUtil.throwServiceException(t);
+        }
+
+        return result;
+    }
+
+    @Path("v1/owner/{owner}/project/{project}/stack/{stack}/pairResidualCalculation")
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @ApiOperation(
-            value = "Calculate alignment residual stats")
+            value = "Calculate alignment residual stats for a tile pair")
     @ApiResponses(value = {
             @ApiResponse(code = 404, message = "stack, match collection, or tile not found")
     })
-    public ResidualCalculator.Result calculateResidualDistances(@PathParam("owner") final String owner,
-                                                                @PathParam("project") final String project,
-                                                                @PathParam("stack") final String stack,
-                                                                @Context final UriInfo uriInfo,
-                                                                final ResidualCalculator.InputData inputData) {
+    public ResidualCalculator.Result calculateResidualDistancesForPair(@PathParam("owner") final String owner,
+                                                                       @PathParam("project") final String project,
+                                                                       @PathParam("stack") final String stack,
+                                                                       @Context final UriInfo uriInfo,
+                                                                       final ResidualCalculator.InputData inputData) {
 
-        LOG.info("calculateResidual: entry, owner={}, project={}, stack={}",
+        LOG.info("calculateResidualDistancesForPair: entry, owner={}, project={}, stack={}",
                  owner, project, stack);
 
         ResidualCalculator.Result result = null;
@@ -560,7 +661,7 @@ public class HierarchicalDataService {
                 pMatchTileSpec = qMatchTileSpec;
                 qMatchTileSpec = swapMatchTileSpec;
 
-                LOG.info("calculateResidual: normalized tile ordering, now pTileId is {} and qTileId is {}",
+                LOG.info("calculateResidualDistancesForPair: normalized tile ordering, now pTileId is {} and qTileId is {}",
                          pTileId, qTileId);
             }
 
@@ -636,8 +737,7 @@ public class HierarchicalDataService {
         return matchRenderParameters.getTileSpecs().get(0);
     }
 
-
-    public static void validateStackIsModifiable(final StackMetaData stackMetaData) {
+    private static void validateStackIsModifiable(final StackMetaData stackMetaData) {
         if (stackMetaData.isReadOnly()) {
             throw new IllegalStateException("Data for stack " + stackMetaData.getStackId().getStack() +
                                             " cannot be modified because it is " + stackMetaData.getState() + ".");

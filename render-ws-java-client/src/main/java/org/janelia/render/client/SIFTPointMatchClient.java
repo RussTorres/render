@@ -154,7 +154,7 @@ public class SIFTPointMatchClient
                         featureStorageParameters.requireStoredFeatures);
 
         final CanvasDataCache dataCache = CanvasDataCache.getSharedCache(cacheMaxKilobytes, featureLoader);
-        final CanvasFeatureMatcher featureMatcher = getCanvasFeatureMatcher(matchDerivationParameters);
+        final CanvasFeatureMatcher featureMatcher = new CanvasFeatureMatcher(matchDerivationParameters);
 
         final List<CanvasMatches> matchList = new ArrayList<>();
 
@@ -185,7 +185,6 @@ public class SIFTPointMatchClient
                                                featureRenderParameters.renderScale,
                                                pClipOffsets,
                                                qClipOffsets,
-                                               matchDerivationParameters.pairMaxDeltaStandardDeviation,
                                                matchList);
         }
 
@@ -226,18 +225,6 @@ public class SIFTPointMatchClient
                                           featureExtraction.minScale,
                                           featureExtraction.maxScale,
                                           featureRender.fillWithNoise);
-    }
-
-    public static CanvasFeatureMatcher getCanvasFeatureMatcher(final MatchDerivationParameters matchParameters) {
-        return new CanvasFeatureMatcher(matchParameters.matchRod,
-                                        matchParameters.matchModelType,
-                                        matchParameters.matchIterations,
-                                        matchParameters.matchMaxEpsilon,
-                                        matchParameters.matchMinInlierRatio,
-                                        matchParameters.matchMinNumInliers,
-                                        matchParameters.matchMaxTrust,
-                                        matchParameters.matchMaxNumInliers,
-                                        matchParameters.matchFilter);
     }
 
     private static final Logger LOG = LoggerFactory.getLogger(SIFTPointMatchClient.class);

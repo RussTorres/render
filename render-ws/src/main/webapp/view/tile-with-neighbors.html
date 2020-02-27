@@ -8,7 +8,7 @@
 
     <script type="text/javascript" src="../script/jquery-2.1.1.min.js"></script>
     <script type="text/javascript" src="../script/janelia-render.js?v=20180611_001"></script>
-    <script type="text/javascript" src="../script/janelia-tile-neighbors.js?v=20170419_001"></script>
+    <script type="text/javascript" src="../script/janelia-tile-neighbors.js?v=20190517_001"></script>
     <script type="text/javascript">
 
         var tileWithNeighbors;
@@ -19,6 +19,11 @@
         };
 
         $( document ).ready(function() {
+
+            const trialRunningSelector = $('#trialRunning');
+            trialRunningSelector.hide();
+            
+            const errorMessageSelector = $('#message');
 
             var util = new JaneliaScriptUtilities();
             var queryParameters = new JaneliaQueryParameters();
@@ -40,6 +45,7 @@
             // The parameters here are for the FAFB00 project.
             // The SPC parameters used in Fall 2016 were simply 'normalizeForMatching=true&filter=true'.
             var defaultRenderQueryParameters = "excludeMask=true&normalizeForMatching=true&width=2760&height=2330";
+            // var defaultRenderQueryParameters = "excludeMask=true&width=2760&height=2330";
 
             var defaultRenderScale = 0.15;
             var renderScale = queryParameters.get('renderScale', defaultRenderScale);
@@ -52,6 +58,8 @@
                     defaultRenderQueryParameters, renderScale, canvas);
 
             if ((typeof tileId !== 'undefined') && (tileId.length > 0)) {
+                const neighborSizeFactor = queryParameters.get("neighborSizeFactor", 0.3);
+                tileWithNeighbors.setNeighborSizeFactor(neighborSizeFactor);
                 tileWithNeighbors.setTileId(tileId);
             }
 
@@ -75,6 +83,12 @@
 
                     if (typeof originalSelectedTile != 'undefined' && typeof selectedTile != "undefined") {
                         tileWithNeighbors.viewTilePair(originalSelectedTile, selectedTile, renderScale * 1.5);
+                    }
+
+                } else if (e.altKey) {
+
+                    if (typeof originalSelectedTile != 'undefined' && typeof selectedTile != "undefined") {
+                        tileWithNeighbors.runTrial(originalSelectedTile, selectedTile, trialRunningSelector, errorMessageSelector);
                     }
 
                 } else {
@@ -135,6 +149,8 @@
 
 <span id="message" class="error"></span>
 
+<span id="trialRunning" class="trialSpinner"></span>
+
 <div id="headerDiv" class="header_div">
     <table class="data_table">
         <tr>
@@ -156,7 +172,7 @@
 </div>
 
 <div id="tileDiv">
-    <canvas id="theCanvas" width="3000" height="3000"></canvas>
+    <canvas id="theCanvas" width="800" height="600"></canvas>
 </div>
 
 </body>

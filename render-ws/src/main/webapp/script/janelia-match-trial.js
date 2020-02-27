@@ -6,25 +6,29 @@
  * @property {String} qId
  * @property {Array} matches
  */
-
-var JaneliaMatchTrialImage = function(renderParametersUrl, row, column, viewScale, cellMargin) {
-
-    this.imageUrl = renderParametersUrl.replace('render-parameters', 'jpeg-image');
+const JaneliaMatchTrialImage = function (renderParametersUrl, row, column, viewScale, cellMargin) {
     this.row = row;
     this.column = column;
-    this.viewScale = viewScale; // TODO: use viewScale when loading image
+    this.viewScale = isNaN(viewScale) ? 0.2 : viewScale;
+    this.renderScale = viewScale;
     this.cellMargin = cellMargin;
 
-    var renderScale = parseFloat(new URL(renderParametersUrl).searchParams.get('scale'));
-    this.renderScale = isNaN(renderScale) ? 1.0 : renderScale;
+    // use viewScale for rendering image
+    const trialImageUrl = new URL(renderParametersUrl.replace('render-parameters', 'jpeg-image'));
+    const renderParametersScale = parseFloat(trialImageUrl.searchParams.get('scale'));
+    const trialRenderScale = isNaN(renderParametersScale) ? 1.0 : renderParametersScale;
+    trialImageUrl.searchParams.set('scale', this.viewScale);
+    this.imageUrl = trialImageUrl.href;
+
+    $('#trialRenderScale').html(trialRenderScale);
 
     this.image = new Image();
     this.x = -1;
     this.y = -1;
     this.imagePositioned = false;
 
-    var self = this;
-    this.image.onload = function() {
+    const self = this;
+    this.image.onload = function () {
         self.positionImage();
     };
 
@@ -38,27 +42,27 @@ JaneliaMatchTrialImage.prototype.loadImage = function() {
 };
 
 JaneliaMatchTrialImage.prototype.positionImage = function() {
-    var scaledWidth = this.image.naturalWidth;
-    var scaledHeight = this.image.naturalHeight;
+    const scaledWidth = this.image.naturalWidth;
+    const scaledHeight = this.image.naturalHeight;
     this.x = (this.column * (scaledWidth + this.cellMargin)) + this.cellMargin;
     this.y = (this.row * (scaledHeight + this.cellMargin)) + this.cellMargin;
     this.imagePositioned = true;
 };
 
 JaneliaMatchTrialImage.prototype.drawLoadedImage = function(canvas) {
-    var context = canvas.getContext("2d");
+    const context = canvas.getContext("2d");
     context.drawImage(this.image, this.x, this.y);
 };
 
 JaneliaMatchTrialImage.prototype.getCanvasWidth = function() {
-    return (this.image.naturalWidth); // TODO: use viewScale when calculating canvas size
+    return (this.image.naturalWidth);
 };
 
 JaneliaMatchTrialImage.prototype.getCanvasHeight = function() {
-    return (this.image.naturalHeight); // TODO: use viewScale when calculating canvas size
+    return (this.image.naturalHeight);
 };
 
-var JaneliaMatchTrial = function(baseUrl, owner, canvas, viewScale) {
+const JaneliaMatchTrial = function (baseUrl, owner, canvas, viewScale) {
 
     this.baseUrl = baseUrl;
     this.owner = owner;
@@ -75,10 +79,12 @@ var JaneliaMatchTrial = function(baseUrl, owner, canvas, viewScale) {
     this.matchIndex = 0;
 
     this.util = new JaneliaScriptUtilities();
+
+    this.drawMatchLines = false;
 };
 
 JaneliaMatchTrial.prototype.clearCanvas = function() {
-    var context = this.canvas.getContext("2d");
+    const context = this.canvas.getContext("2d");
     context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 };
 
@@ -89,7 +95,7 @@ JaneliaMatchTrial.prototype.loadTrial = function(trialId) {
     this.matchCount = undefined;
     this.matchIndex = 0;
 
-    var self = this;
+    const self = this;
     $.ajax({
                url: self.matchTrialUrl + '/' + trialId,
                cache: false,
@@ -104,16 +110,11 @@ JaneliaMatchTrial.prototype.loadTrial = function(trialId) {
 
 JaneliaMatchTrial.prototype.openNewTrialWindow = function() {
 
-    var self = this;
-    var stop = window.location.href.indexOf('?');
-    var url;
-    if (stop === -1) {
-        url = window.location.href;
-    } else {
-        url = window.location.href.substring(0, stop);
-    }
+    const self = this;
+    const url = new URL(window.location.href);
+    url.searchParams.set("matchTrialId", "TBD");
 
-    var newTrialWindow = window.open(url + '?matchTrialId=TBD', '_blank');
+    const newTrialWindow = window.open(url.href, '_blank');
     newTrialWindow.focus();
 
     newTrialWindow.addEventListener('load', function() {
@@ -122,9 +123,13 @@ JaneliaMatchTrial.prototype.openNewTrialWindow = function() {
 
 };
 
+/**
+ * @typedef {Object} newTrialWindow
+ * @property {String} matchTrial
+ */
 JaneliaMatchTrial.prototype.initNewTrialWindow = function(newTrialWindow, retryCount) {
 
-    var self = this;
+    const self = this;
     if (typeof self.trialResults !== 'undefined') {
 
         if (typeof newTrialWindow.matchTrial !== 'undefined') {
@@ -142,16 +147,34 @@ JaneliaMatchTrial.prototype.initNewTrialWindow = function(newTrialWindow, retryC
 
 };
 
+/**
+ * @typedef {Object} parameters
+ * @property {String} featureAndMatchParameters
+ * @property {String} fillWithNoise
+ * @property {String} pRenderParametersUrl
+ * @property {String} qRenderParametersUrl
+ */
 JaneliaMatchTrial.prototype.initNewTrialForm = function(parameters) {
 
-    var fParams = parameters.featureAndMatchParameters.siftFeatureParameters;
-    $('#fdSize').val(fParams.fdSize);
-    $('#minScale').val(fParams.minScale);
-    $('#maxScale').val(fParams.maxScale);
-    $('#steps').val(fParams.steps);
+    const fmParams = parameters.featureAndMatchParameters;
+    $('#fdSize').val(fmParams.siftFeatureParameters.fdSize);
+    $('#minScale').val(fmParams.siftFeatureParameters.minScale);
+    $('#maxScale').val(fmParams.siftFeatureParameters.maxScale);
+    $('#steps').val(fmParams.siftFeatureParameters.steps);
 
-    var mParams = parameters.featureAndMatchParameters.matchDerivationParameters;
+    const mParams = fmParams.matchDerivationParameters;
     $('#matchModelType').val(mParams.matchModelType);
+
+    const matchRegularizerModelType = mParams.matchRegularizerModelType;
+    const matchInterpolatedModelLambda = mParams.matchInterpolatedModelLambda;
+
+    if ((typeof matchRegularizerModelType !== "undefined") &&
+        (matchRegularizerModelType !== "NOT INTERPOLATED") &&
+        (typeof matchInterpolatedModelLambda !== "undefined")) {
+        $("#matchRegularizerModelType").val(matchRegularizerModelType);
+        $("#matchInterpolatedModelLambda").val(matchInterpolatedModelLambda);
+    }
+
     $('#matchRod').val(mParams.matchRod);
     $('#matchIterations').val(mParams.matchIterations);
     $('#matchMaxEpsilon').val(mParams.matchMaxEpsilon);
@@ -162,10 +185,10 @@ JaneliaMatchTrial.prototype.initNewTrialForm = function(parameters) {
 
     $('#fillWithNoise').val(parameters.fillWithNoise);
 
-    var pClipPosition = parameters.featureAndMatchParameters.pClipPosition;
-    if ((typeof pClipPosition !== undefined) && (pClipPosition !== 'NO CLIP')) {
+    const pClipPosition = fmParams.pClipPosition;
+    if ((typeof pClipPosition !== "undefined") && (pClipPosition !== "NO CLIP")) {
         $('#pClipPosition').val(pClipPosition);
-        $('#clipPixels').val(parameters.featureAndMatchParameters.clipPixels);
+        $('#clipPixels').val(fmParams.clipPixels);
     }
 
     $('#pRenderParametersUrl').val(parameters.pRenderParametersUrl);
@@ -174,46 +197,58 @@ JaneliaMatchTrial.prototype.initNewTrialForm = function(parameters) {
 
 JaneliaMatchTrial.prototype.runTrial = function(runTrialButtonSelector, trialRunningSelector, errorMessageSelector) {
 
-    var featureAndMatchParameters = {
-        "siftFeatureParameters" : {
-            "fdSize" : parseInt($('#fdSize').val()),
-            "minScale" : parseFloat($('#minScale').val()),
-            "maxScale" : parseFloat($('#maxScale').val()),
-            "steps" : parseInt($('#steps').val())
+    const featureAndMatchParameters = {
+        "siftFeatureParameters": {
+            "fdSize": parseInt($('#fdSize').val()),
+            "minScale": parseFloat($('#minScale').val()),
+            "maxScale": parseFloat($('#maxScale').val()),
+            "steps": parseInt($('#steps').val())
         },
-        "matchDerivationParameters" : {
-            "matchRod" : parseFloat($('#matchRod').val()),
-            "matchModelType" : this.util.getSelectedValue('matchModelType'),
-            "matchIterations" : parseInt($('#matchIterations').val()),
-            "matchMaxEpsilon" : parseFloat($('#matchMaxEpsilon').val()),
-            "matchMinInlierRatio" : parseFloat($('#matchMinInlierRatio').val()),
-            "matchMinNumInliers" : parseInt($('#matchMinNumInliers').val()),
-            "matchMaxTrust" : parseFloat($('#matchMaxTrust').val()),
-            "matchFilter" : this.util.getSelectedValue('matchFilter')
+        "matchDerivationParameters": {
+            "matchRod": parseFloat($('#matchRod').val()),
+            "matchModelType": this.util.getSelectedValue('matchModelType'),
+            "matchIterations": parseInt($('#matchIterations').val()),
+            "matchMaxEpsilon": parseFloat($('#matchMaxEpsilon').val()),
+            "matchMinInlierRatio": parseFloat($('#matchMinInlierRatio').val()),
+            "matchMinNumInliers": parseInt($('#matchMinNumInliers').val()),
+            "matchMaxTrust": parseFloat($('#matchMaxTrust').val()),
+            "matchFilter": this.util.getSelectedValue('matchFilter')
         }
     };
 
-    var pClipPosition = $('#pClipPosition').val();
-    if ((typeof pClipPosition !== undefined) && (pClipPosition !== 'NO CLIP')) {
+    const matchRegularizerModelType = $("#matchRegularizerModelType").val();
+    const matchInterpolatedModelLambda = $("#matchInterpolatedModelLambda").val();
+
+    if ((typeof matchRegularizerModelType !== "undefined") &&
+        (matchRegularizerModelType !== "NOT INTERPOLATED") &&
+        (typeof matchInterpolatedModelLambda !== "undefined")) {
+
+        const mParams = featureAndMatchParameters["matchDerivationParameters"];
+        mParams["matchRegularizerModelType"] = matchRegularizerModelType;
+        mParams["matchInterpolatedModelLambda"] = parseFloat(matchInterpolatedModelLambda);
+    }
+
+    const pClipPosition = $('#pClipPosition').val();
+    if ((typeof pClipPosition !== "undefined") && (pClipPosition !== "NO CLIP")) {
         featureAndMatchParameters['pClipPosition'] = pClipPosition;
         featureAndMatchParameters['clipPixels'] = parseInt($('#clipPixels').val());
     }
 
-    var requestData = {
+    const requestData = {
         featureAndMatchParameters: featureAndMatchParameters,
         pRenderParametersUrl: $('#pRenderParametersUrl').val(),
         qRenderParametersUrl: $('#qRenderParametersUrl').val()
     };
 
-    var parametersUrlRegex = /.*render-parameters.*/;
+    const parametersUrlRegex = /.*render-parameters.*/;
     if (requestData.pRenderParametersUrl.match(parametersUrlRegex) &&
-        requestData.pRenderParametersUrl.match(parametersUrlRegex)) {
+        requestData.qRenderParametersUrl.match(parametersUrlRegex)) {
 
         errorMessageSelector.text('');
         runTrialButtonSelector.prop("disabled", true);
         trialRunningSelector.show();
 
-        var self = this;
+        const self = this;
         $.ajax({
                    type: "POST",
                    headers: {
@@ -224,9 +259,9 @@ JaneliaMatchTrial.prototype.runTrial = function(runTrialButtonSelector, trialRun
                    data: JSON.stringify(requestData),
                    cache: false,
                    success: function(data) {
-                       var stop = window.location.href.indexOf('?');
-                       window.location = window.location.href.substring(0, stop) +
-                                         '?matchTrialId=' + data.id + '&viewScale=' + self.viewScale;
+                       const url = new URL(window.location.href);
+                       url.searchParams.set("matchTrialId", data.id);
+                       window.location = url;
                    },
                    error: function(data, text, xhr) {
                        console.log(xhr);
@@ -245,8 +280,8 @@ JaneliaMatchTrial.prototype.runTrial = function(runTrialButtonSelector, trialRun
 };
 
 JaneliaMatchTrial.prototype.getRenderParametersLink = function(parametersUrl) {
-    var splitUrl = parametersUrl.split('/');
-    var urlName;
+    const splitUrl = parametersUrl.split('/');
+    let urlName;
     if (splitUrl.length > 2) {
         urlName = splitUrl[splitUrl.length - 2];
     } else {
@@ -256,13 +291,15 @@ JaneliaMatchTrial.prototype.getRenderParametersLink = function(parametersUrl) {
 };
 
 /**
- * @param data.parameters
+ * @param data.parameters.featureAndMatchParameters.matchDerivationParameters.matchMaxNumInliers
  * @param {Array} data.matches
  * @param data.stats.pFeatureCount
  * @param data.stats.pFeatureDerivationMilliseconds
  * @param data.stats.qFeatureCount
  * @param data.stats.qFeatureDerivationMilliseconds
  * @param {Array} data.stats.consensusSetSizes
+ * @param data.stats.aggregateDeltaXStandardDeviation
+ * @param data.stats.aggregateDeltaYStandardDeviation
  * @param {Array} data.stats.consensusSetDeltaXStandardDeviations
  * @param {Array} data.stats.consensusSetDeltaYStandardDeviations
  * @param data.stats.matchDerivationMilliseconds
@@ -279,25 +316,27 @@ JaneliaMatchTrial.prototype.loadTrialResults = function(data) {
     this.qImage = new JaneliaMatchTrialImage(data.parameters.qRenderParametersUrl, 0, 1, this.viewScale, this.cellMargin);
     this.qImage.loadImage();
 
-    var fParams = data.parameters.featureAndMatchParameters.siftFeatureParameters;
-    $('#trialFdSize').html(fParams.fdSize);
-    $('#trialMinScale').html(fParams.minScale);
-    $('#trialMaxScale').html(fParams.maxScale);
-    $('#trialSteps').html(fParams.steps);
+    const fmParams = data.parameters.featureAndMatchParameters;
 
-    var pClipPosition = data.parameters.featureAndMatchParameters.pClipPosition;
-    if (typeof pClipPosition === 'undefined') {
-        pClipPosition = 'n/a';
+    $('#trialFdSize').html(fmParams.siftFeatureParameters.fdSize);
+    $('#trialMinScale').html(fmParams.siftFeatureParameters.minScale);
+    $('#trialMaxScale').html(fmParams.siftFeatureParameters.maxScale);
+    $('#trialSteps').html(fmParams.siftFeatureParameters.steps);
+
+    if ((typeof fmParams.pClipPosition !== 'undefined') &&
+        (typeof fmParams.clipPixels !== 'undefined')) {
+        const trialClipRowHtml =
+                '<td>Clip Parameters:</td>' +
+                '<td colspan="4">' +
+                '  pRelativePosition: <span class="parameterValue">' + fmParams.pClipPosition + '</span>' +
+                '  clipPixels: <span class="parameterValue">' + fmParams.clipPixels + '</span>' +
+                '</td>';
+        $('#trialClipRow').html(trialClipRowHtml);
+    } else {
+        $('#trialClipRow').hide();
     }
 
-    var clipPixels = data.parameters.featureAndMatchParameters.clipPixels;
-    if (typeof clipPixels === 'undefined') {
-        clipPixels = 'n/a';
-    }
-    $('#trialPClipPosition').html(pClipPosition);
-    $('#trialClipPixels').html(clipPixels);
-
-    var mParams = data.parameters.featureAndMatchParameters.matchDerivationParameters;
+    const mParams = data.parameters.featureAndMatchParameters.matchDerivationParameters;
     $('#trialMatchModelType').html(mParams.matchModelType);
     $('#trialMatchRod').html(mParams.matchRod);
     $('#trialMatchIterations').html(mParams.matchIterations);
@@ -306,6 +345,15 @@ JaneliaMatchTrial.prototype.loadTrialResults = function(data) {
     $('#trialMatchMinNumInliers').html(mParams.matchMinNumInliers);
     $('#trialMatchMaxTrust').html(mParams.matchMaxTrust);
     $('#trialMatchFilter').html(mParams.matchFilter);
+
+    let interpolatedModelFieldsHtml = "";
+    if ((typeof mParams.matchRegularizerModelType !== "undefined") &&
+        (typeof mParams.matchInterpolatedModelLambda !== "undefined")) {
+        interpolatedModelFieldsHtml =
+                'regularizerModelType: <span class="parameterValue">' + mParams.matchRegularizerModelType + '</span> ' +
+                'interpolatedModelLambda: <span class="parameterValue">' + mParams.matchInterpolatedModelLambda + '</span>';
+    }
+    $('#trialInterpolatedModelFields').html(interpolatedModelFieldsHtml);
 
     if (typeof mParams.matchMaxNumInliers !== 'undefined') {
         $('#trialMatchMaxNumInliers').html(mParams.matchMaxNumInliers);
@@ -316,22 +364,22 @@ JaneliaMatchTrial.prototype.loadTrialResults = function(data) {
     $('#trialpRenderParametersUrl').html(this.getRenderParametersLink(data.parameters.pRenderParametersUrl));
     $('#trialqRenderParametersUrl').html(this.getRenderParametersLink(data.parameters.qRenderParametersUrl));
 
-    var consensusSetMatches = this.trialResults.matches;
+    const consensusSetMatches = this.trialResults.matches;
     this.matchCount = 0;
-    for (var consensusSetIndex = 0; consensusSetIndex < consensusSetMatches.length; consensusSetIndex++) {
-        var matches = consensusSetMatches[consensusSetIndex];
+    for (let consensusSetIndex = 0; consensusSetIndex < consensusSetMatches.length; consensusSetIndex++) {
+        const matches = consensusSetMatches[consensusSetIndex];
         this.matchCount += matches.w.length;
     }
 
-    var stats = this.trialResults.stats;
+    const stats = this.trialResults.stats;
 
     $('#pFeatureStats').html(stats.pFeatureCount + ' features were derived in ' +
                              stats.pFeatureDerivationMilliseconds + ' ms');
     $('#qFeatureStats').html(stats.qFeatureCount + ' features were derived in ' +
                              stats.qFeatureDerivationMilliseconds + ' ms');
 
-    var csSizes = stats.consensusSetSizes;
-    var csText;
+    const csSizes = stats.consensusSetSizes;
+    let csText;
     if (csSizes.length === 1) {
         if (this.matchCount === 0) {
             csText = 'NO matches were '
@@ -342,9 +390,28 @@ JaneliaMatchTrial.prototype.loadTrialResults = function(data) {
         csText = csSizes.length + ' consensus sets with [' + csSizes.toString() + '] matches were';
     }
 
-    var html = csText + ' derived in ' + stats.matchDerivationMilliseconds + ' ms' +
-               this.getStandardDeviationHtml('X', stats.consensusSetDeltaXStandardDeviations) +
-               this.getStandardDeviationHtml('Y', stats.consensusSetDeltaYStandardDeviations);
+    const totalSeconds = (stats.pFeatureDerivationMilliseconds +
+                          stats.qFeatureDerivationMilliseconds +
+                          stats.matchDerivationMilliseconds) / 1000;
+
+    $('#trialElapsedMessage').html(', took ' + totalSeconds + ' seconds to process');
+
+    // hack to populate aggregate std dev for older match trials that have only one consensus set ...
+    if ((typeof stats.aggregateDeltaXStandardDeviation === 'undefined') &&
+        (mParams.matchFilter !== 'AGGREGATED_CONSENSUS_SETS') &&
+        (stats.consensusSetDeltaXStandardDeviations.length === 1)) {
+
+        stats.aggregateDeltaXStandardDeviation = stats.consensusSetDeltaXStandardDeviations[0];
+        stats.aggregateDeltaYStandardDeviation = stats.consensusSetDeltaYStandardDeviations[0];
+    }
+
+    const html = csText + " derived in " + stats.matchDerivationMilliseconds + " ms" +
+                 this.getStandardDeviationHtml('X',
+                                               stats.aggregateDeltaXStandardDeviation,
+                                               stats.consensusSetDeltaXStandardDeviations) +
+                 this.getStandardDeviationHtml('Y',
+                                               stats.aggregateDeltaYStandardDeviation,
+                                               stats.consensusSetDeltaYStandardDeviations);
 
     $('#matchStats').html(html);
 
@@ -352,24 +419,30 @@ JaneliaMatchTrial.prototype.loadTrialResults = function(data) {
 };
 
 JaneliaMatchTrial.prototype.getStandardDeviationHtml = function(xOrY,
+                                                                aggregateStandardDeviationValue,
                                                                 standardDeviationValues) {
-    var html = '';
-    if (typeof standardDeviationValues !== 'undefined') {
+    let html = '<br/>Delta ' + xOrY + ' Standard Deviation:';
+    if (Array.isArray(standardDeviationValues)) {
         if (standardDeviationValues.length > 1) {
-            html = '<br/>Set Delta ' + xOrY + ' Standard Deviations: [ ' + this.getDeltaHtml(standardDeviationValues[0]);
-            for (var i = 1; i < standardDeviationValues.length; i++) {
+            if (typeof aggregateStandardDeviationValue !== 'undefined') {
+                html += ' aggregate ' + this.getDeltaHtml(aggregateStandardDeviationValue) + ',';
+            }
+            html += ' sets [ ' + this.getDeltaHtml(standardDeviationValues[0]);
+            for (let i = 1; i < standardDeviationValues.length; i++) {
                 html = html + ', ' + this.getDeltaHtml(standardDeviationValues[i]);
             }
             html += ' ]';
+        } else if (typeof aggregateStandardDeviationValue !== 'undefined') {
+            html += ' ' + this.getDeltaHtml(aggregateStandardDeviationValue);
         } else {
-            html = '<br/>Delta ' + xOrY + ' Standard Deviation: ' + this.getDeltaHtml(standardDeviationValues[0]);
+            html += ' n/a';
         }
     }
     return html;
 };
 
 JaneliaMatchTrial.prototype.getDeltaHtml = function(value) {
-    var html = value.toFixed(1);
+    let html = value.toFixed(1);
     if (value > 8) {
         html = '<span style="color:red;">' + html + '</span>';
     }
@@ -384,7 +457,7 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
 
     if (this.pImage.imagePositioned && this.qImage.imagePositioned) {
 
-        var context = this.canvas.getContext("2d");
+        const context = this.canvas.getContext("2d");
 
         context.canvas.width = this.qImage.x + this.qImage.getCanvasWidth() + this.cellMargin;
         context.canvas.height =
@@ -396,14 +469,14 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
 
         if (this.matchCount > 0) {
 
-            var consensusSetMatches = this.trialResults.matches;
+            const consensusSetMatches = this.trialResults.matches;
 
             context.lineWidth = 1;
 
-            var matchInfoSelector = $('#matchInfo');
-            var consensusSetIndex = 0;
-            var matches;
-            var i;
+            const matchInfoSelector = $('#matchInfo');
+            let consensusSetIndex = 0;
+            let matches;
+            let i;
 
             if (typeof matchIndexDelta !== 'undefined') {
 
@@ -412,7 +485,7 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
                     this.matchIndex = this.matchCount - 1;
                 }
 
-                var lastI = 0;
+                let lastI = 0;
                 for (; consensusSetIndex < consensusSetMatches.length; consensusSetIndex++) {
                     matches = consensusSetMatches[consensusSetIndex];
                     i = this.matchIndex - lastI;
@@ -430,14 +503,35 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
 
                 this.matchIndex = 0;
 
-                var colors = ['#00ff00', '#f48342', '#42eef4', '#f442f1'];
+                if (consensusSetMatches.length === 1) {
 
-                for (; consensusSetIndex < consensusSetMatches.length; consensusSetIndex++) {
-                    matches = consensusSetMatches[consensusSetIndex];
+                    matches = consensusSetMatches[0];
+
+                    const colors = ['#00ff00', '#f48342', '#42eef4', '#f442f1'];
+
                     for (i = 0; i < matches.w.length; i++) {
                         context.strokeStyle = colors[i % colors.length];
                         this.drawMatch(matches, i, this.pImage, this.qImage, context);
                     }
+
+                } else {
+
+                    // color set adapted from https://sashat.me/2017/01/11/list-of-20-simple-distinct-colors/
+                    const colors = [
+                        '#4363d8', '#e6194b', '#3cb44b', '#ffe119',
+                        '#f58231', '#911eb4', '#46f0f0', '#f032e6',
+                        '#bcf60c', '#fabebe', '#008080', '#e6beff',
+                        '#9a6324', '#800000', '#aaffc3',
+                    ];
+
+                    for (; consensusSetIndex < consensusSetMatches.length; consensusSetIndex++) {
+                        matches = consensusSetMatches[consensusSetIndex];
+                        context.strokeStyle = colors[consensusSetIndex % colors.length];
+                        for (i = 0; i < matches.w.length; i++) {
+                            this.drawMatch(matches, i, this.pImage, this.qImage, context);
+                        }
+                    }
+
                 }
 
                 matchInfoSelector.html(this.matchCount + ' total matches');
@@ -447,7 +541,7 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
 
     } else {
 
-        var self = this;
+        const self = this;
         setTimeout(function () {
             self.drawSelectedMatches(matchIndexDelta);
         }, 500);
@@ -458,17 +552,117 @@ JaneliaMatchTrial.prototype.drawSelectedMatches = function(matchIndexDelta) {
 
 JaneliaMatchTrial.prototype.drawMatch = function(matches, matchIndex, pImage, qImage, context) {
 
-    var pMatches = matches.p;
-    var qMatches = matches.q;
+    const pMatches = matches.p;
+    const qMatches = matches.q;
 
-    var px = (pMatches[0][matchIndex] * pImage.renderScale * pImage.viewScale) + pImage.x;
-    var py = (pMatches[1][matchIndex] * pImage.renderScale * pImage.viewScale) + pImage.y;
-    var qx = (qMatches[0][matchIndex] * qImage.renderScale * qImage.viewScale) + qImage.x;
-    var qy = (qMatches[1][matchIndex] * qImage.renderScale * qImage.viewScale) + qImage.y;
+    const px = (pMatches[0][matchIndex] * pImage.viewScale) + pImage.x;
+    const py = (pMatches[1][matchIndex] * pImage.viewScale) + pImage.y;
+    const qx = (qMatches[0][matchIndex] * qImage.viewScale) + qImage.x;
+    const qy = (qMatches[1][matchIndex] * qImage.viewScale) + qImage.y;
 
-    context.beginPath();
-    context.moveTo(px, py);
-    context.lineTo(qx, qy);
-    context.stroke();
+    if (this.drawMatchLines) {
+        context.beginPath();
+        context.moveTo(px, py);
+        context.lineTo(qx, qy);
+        context.stroke();
+    } else {
+        const radius = 3;
+        const twoPI = Math.PI * 2;
+        context.beginPath();
+        context.arc(px, py, radius, 0, twoPI);
+        context.stroke();
+        context.beginPath();
+        context.arc(qx, qy, radius, 0, twoPI);
+        context.stroke();
+    }
+
+};
+
+JaneliaMatchTrial.prototype.toggleLinesAndPoints = function() {
+    this.drawMatchLines = ! this.drawMatchLines;
+    this.drawSelectedMatches(undefined);
+
+    const toggleLinesAndPointsSelector = $("#toggleLinesAndPoints");
+    if (this.drawMatchLines) {
+        toggleLinesAndPointsSelector.prop('value', 'Points')
+    } else {
+        toggleLinesAndPointsSelector.prop('value', 'Lines')
+    }
+};
+
+JaneliaMatchTrial.prototype.saveTrialResultsToCollection = function(saveToOwner, saveToCollection, errorMessageSelector) {
+
+    const FAFB_renderRegEx = /(.*\/render-ws).*\/owner\/([^\/]+)\/project\/([^\/]+)\/stack\/([^\/]+)\/tile\/([0-9]+\.([0-9]+\.[0-9]+))\/render-parameters.*/;
+    const pUrlMatch = this.trialResults.parameters.pRenderParametersUrl.match(FAFB_renderRegEx);
+    const qUrlMatch = this.trialResults.parameters.qRenderParametersUrl.match(FAFB_renderRegEx);
+
+    if ((typeof saveToCollection === 'undefined') || (saveToCollection.length === 0)) {
+
+        errorMessageSelector.text("alpha version of save feature requires saveToCollection query parameter to be defined");
+
+    } else if (this.trialResults.matches.length !== 1) {
+
+        errorMessageSelector.text("trial must have one and only one set of matches to save");
+
+    } else if (pUrlMatch && qUrlMatch) {
+
+        const baseViewUrl = pUrlMatch[1] + "/view";
+        const renderStackOwner = pUrlMatch[2];
+        const renderStackProject = pUrlMatch[3];
+        const renderStack = pUrlMatch[4];
+
+        const pTileId = pUrlMatch[5];
+        const pGroupId = pUrlMatch[6];
+        const qTileId = qUrlMatch[5];
+        const qGroupId = qUrlMatch[6];
+
+        const matchPairData = {
+            "pGroupId": pGroupId,
+            "pId": pTileId,
+            "qGroupId": qGroupId,
+            "qId": qTileId,
+            "matches": this.trialResults.matches[0]
+        };
+        const matchPairDataArray = [ matchPairData ];
+
+        const matchesUrl = this.baseUrl + "/owner/" + saveToOwner + "/matchCollection/" + saveToCollection + "/matches";
+        const tilePairUrl = baseViewUrl + "/tile-pair.html?renderScale=0.1&renderStackOwner=" + renderStackOwner +
+                            "&renderStackProject=" + renderStackProject +
+                            "&renderStack=" + renderStack +
+                            "&matchOwner=" + saveToOwner +
+                            "&matchCollection=" + saveToCollection +
+                            "&pGroupId=" + pGroupId +
+                            "&pId=" + pTileId +
+                            "&qGroupId=" + qGroupId +
+                            "&qId=" + qTileId;
+
+        errorMessageSelector.text("");
+
+        // noinspection JSUnusedLocalSymbols
+        $.ajax({
+                   type: "PUT",
+                   headers: {
+                       'Accept': 'application/json',
+                       'Content-Type': 'application/json'
+                   },
+                   url: matchesUrl,
+                   data: JSON.stringify(matchPairDataArray),
+                   cache: false,
+                   success: function(data) {
+                       const matchPairHtml = '<a target="_blank" href="' + tilePairUrl + '">match pair</a>';
+                       errorMessageSelector.html("saved " + matchPairHtml + " to " + saveToCollection);
+                   },
+                   error: function(data, text, xhr) {
+                       console.log(xhr);
+                       errorMessageSelector.text(data.statusText + ': ' + data.responseText);
+                   }
+               });
+
+    } else {
+
+        errorMessageSelector.text("alpha version of save feature cannot parse render URL(s) for this match trial");
+
+    }
+
 };
 

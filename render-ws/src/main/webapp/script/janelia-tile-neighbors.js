@@ -37,6 +37,7 @@ var JaneliaTile2 = function(tileSpec, stackUrl, matchCollectionUrl, renderQueryP
     this.matches = [];
     this.matchIndex = -1;
     this.matchInfoSelector = undefined;
+    this.drawMatchLines = true;
 };
 
 JaneliaTile2.prototype.getMatchesUrl = function(qTile) {
@@ -52,6 +53,7 @@ JaneliaTile2.prototype.drawLoadedImage = function() {
     var context = this.canvas.getContext("2d");
     var canvasOffset = 4;
     var tileMargin = 4;
+    // TODO: fix this for cases where tiles are different sizes
     this.x = (this.column * (scaledWidth + tileMargin)) + canvasOffset;
     this.y = (this.row * (scaledHeight + tileMargin)) + canvasOffset;
     context.drawImage(this.image, this.x, this.y);
@@ -176,10 +178,21 @@ JaneliaTile2.prototype.drawMatch = function(canvasMatches, matchIndex, pTile, qT
     var qx = (qMatches[0][matchIndex] * this.scale) + qTile.x;
     var qy = (qMatches[1][matchIndex] * this.scale) + qTile.y;
 
-    context.beginPath();
-    context.moveTo(px, py);
-    context.lineTo(qx, qy);
-    context.stroke();
+    if (this.drawMatchLines) {
+        context.beginPath();
+        context.moveTo(px, py);
+        context.lineTo(qx, qy);
+        context.stroke();
+    } else {
+        const radius = 3;
+        const twoPI = Math.PI * 2;
+        context.beginPath();
+        context.arc(px, py, radius, 0, twoPI);
+        context.stroke();
+        context.beginPath();
+        context.arc(qx, qy, radius, 0, twoPI);
+        context.stroke();
+    }
 };
 
 var JaneliaTileWithNeighbors = function(baseUrl, owner, project, stack, matchOwner, matchCollection, renderQueryParameters, scale, canvas) {
@@ -193,6 +206,7 @@ var JaneliaTileWithNeighbors = function(baseUrl, owner, project, stack, matchOwn
     this.renderQueryParameters = renderQueryParameters;
     this.scale = scale;
     this.canvas = canvas;
+    this.neighborSizeFactor = 0.3;
 
     this.stackUrl = this.baseUrl + "/owner/" + this.owner + "/project/" + this.project + "/stack/" + this.stack;
     this.tileUrl = this.stackUrl + "/tile/";
@@ -206,7 +220,15 @@ var JaneliaTileWithNeighbors = function(baseUrl, owner, project, stack, matchOwn
         this.matchCollectionUrl = undefined;
     }
 
+    this.drawMatchLines = true;
+
     this.janeliaTileMap = {};
+
+    this.selectedTile = undefined;
+};
+
+JaneliaTileWithNeighbors.prototype.setNeighborSizeFactor = function(factor) {
+    this.neighborSizeFactor = factor;
 };
 
 JaneliaTileWithNeighbors.prototype.setTileId = function(tileId) {
@@ -217,9 +239,11 @@ JaneliaTileWithNeighbors.prototype.setTileId = function(tileId) {
     var ctx = this.canvas.getContext("2d");
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+    const queryParameters = "?widthFactor=" + this.neighborSizeFactor + "&heightFactor=" + this.neighborSizeFactor;
+
     var self = this;
     $.ajax({
-               url: self.tileUrl + tileId + "/withNeighbors/render-parameters",
+               url: self.tileUrl + tileId + "/withNeighbors/render-parameters" + queryParameters,
                cache: false,
                success: function(data) {
                    self.loadNeighbors(data);
@@ -230,6 +254,125 @@ JaneliaTileWithNeighbors.prototype.setTileId = function(tileId) {
            });
 };
 
+const JaneliaGridOrientation = function(tileSpecs,
+                                        columnOffset) {
+
+    this.columnOffset = columnOffset;
+    
+    const self = this;
+
+    let specA = tileSpecs[0];
+
+    this.minRow = specA.layout.imageRow;
+    this.maxRow = specA.layout.imageRow;
+    this.minColumn = specA.layout.imageCol;
+    this.maxColumn = specA.layout.imageCol;
+
+    for (let index = 1; index < tileSpecs.length; index++) {
+        const tileSpec = tileSpecs[index];
+        this.minRow = Math.min(this.minRow, tileSpec.layout.imageRow);
+        this.maxRow = Math.max(this.maxRow, tileSpec.layout.imageRow);
+        this.minColumn = Math.min(this.minColumn, tileSpec.layout.imageCol);
+        this.maxColumn = Math.max(this.maxColumn, tileSpec.layout.imageCol);
+    }
+
+    // assume actual orientation is same as layout:           AB
+    this.getViewRowAndColumn = function (forTileSpec) {    // CD
+        return {
+            row: forTileSpec.layout.imageRow - self.minRow,
+            column: forTileSpec.layout.imageCol - self.minColumn + self.columnOffset,
+            maxViewRow: self.maxRow - self.minRow,
+            maxViewColumn: self.maxColumn - self.minColumn + self.columnOffset
+        };
+    };
+
+    // // actual orientation is rotated 90 degrees from layout:  DA
+    // const rotate90 = function (forTileSpec) {              // CB
+    //     return {
+    //         row: forTileSpec.layout.imageCol - self.minColumn,
+    //         column: self.maxRow - forTileSpec.layout.imageRow + self.columnOffset,
+    //         maxViewColumn: self.maxRow - self.minRow + self.columnOffset
+    //     };
+    // };
+    //
+    // // actual orientation is rotated 180 degrees from layout: DC
+    // const rotate180 = function (forTileSpec) {             // BA
+    //     return {
+    //         row: self.maxRow - forTileSpec.layout.imageRow,
+    //         column: self.maxColumn - forTileSpec.layout.imageCol + self.columnOffset,
+    //         maxViewColumn: self.maxColumn - self.minColumn + self.columnOffset
+    //     };
+    // };
+    //
+    // // actual orientation is rotated 270 degrees from layout: BC
+    // const rotate270 = function (forTileSpec) {             // AD
+    //     return {
+    //         row: self.maxColumn - forTileSpec.layout.imageCol,
+    //         column: forTileSpec.layout.imageRow - self.minRow + self.columnOffset,
+    //         maxViewColumn: self.maxRow - self.minRow + self.columnOffset
+    //     };
+    // };
+    //
+    // if (tileSpecs.length > 1) {
+    //
+    //     let specB = tileSpecs[1];
+    //
+    //     if (specA.layout.imageRow > specB.layout.imageRow) {
+    //         specB = specA;
+    //         specA = tileSpecs[1];
+    //     } else if (specA.layout.imageRow === specB.layout.imageRow) {
+    //         if (specA.layout.imageCol > specB.layout.imageCol) {
+    //             specB = specA;
+    //             specA = tileSpecs[1];
+    //         }
+    //     }
+    //
+    //     const deltaX = specA.minX - specB.minX;
+    //     const deltaY = specA.minY - specB.minY;
+    //
+    //     if (specA.layout.imageRow === specB.layout.imageRow) {
+    //
+    //         if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    //             if (specA.minX > specB.minX) {
+    //                 this.getViewRowAndColumn = rotate180;
+    //             } // else actual == layout
+    //         } else if (specA.minY < specB.minY) {
+    //             this.getViewRowAndColumn = rotate90;
+    //         } else {
+    //             this.getViewRowAndColumn = rotate270;
+    //         }
+    //
+    //     } else if (specA.layout.imageCol === specB.layout.imageCol) {
+    //
+    //         if (Math.abs(deltaY) > Math.abs(deltaX)) {
+    //             if (specA.minY > specB.minY) {
+    //                 this.getViewRowAndColumn = rotate180;
+    //             } // else actual == layout
+    //         } else if (specA.minX < specB.minX) {
+    //             this.getViewRowAndColumn = rotate270;
+    //         } else {
+    //             this.getViewRowAndColumn = rotate90;
+    //         }
+    //
+    //     } else if (deltaX > 0) {
+    //
+    //         if (deltaY > 0) {
+    //             this.getViewRowAndColumn = rotate180;
+    //         } else {
+    //             this.getViewRowAndColumn = rotate90;
+    //         }
+    //
+    //     } else if (deltaY > 0) {
+    //         this.getViewRowAndColumn = rotate270;
+    //     } // else actual == layout
+    //
+    // }
+
+    const viewRowAndColumnForSpecA = this.getViewRowAndColumn(specA);
+    this.maxViewRow = viewRowAndColumnForSpecA.maxViewRow;
+    this.maxViewColumn = viewRowAndColumnForSpecA.maxViewColumn;
+};
+
 /**
  * @param data
  * @param data.layout
@@ -238,115 +381,76 @@ JaneliaTileWithNeighbors.prototype.setTileId = function(tileId) {
  */
 JaneliaTileWithNeighbors.prototype.loadNeighbors = function(data) {
 
+    const tileSpecs = data["tileSpecs"];
+
     this.janeliaTileMap = {};
 
-    var sectionMap = {};
-    var tileSpecs = data["tileSpecs"];
-    var firstRow = undefined;
-    var firstColumn = undefined;
+    const sectionToTileSpecsMap = {};
 
-    var tileSpec;
-    var sectionData;
-    var originalTileWidth;
-    var originalTileHeight;
+    let pageQueryParameters = new JaneliaQueryParameters();
 
-    for (var index = 0; index < tileSpecs.length; index++) {
+    for (let index = 0; index < tileSpecs.length; index++) {
 
-        tileSpec = tileSpecs[index];
+        const tileSpec = tileSpecs[index];
 
-        if (! sectionMap.hasOwnProperty(tileSpec.layout.sectionId)) {
-            sectionMap[tileSpec.layout.sectionId] = {
-                minXList: [],
-                minYList: [],
-                janeliaTiles: {}
-            };
+        if (tileSpec.layout.sectionId !== pageQueryParameters.get("sectionId", tileSpec.layout.sectionId)) {
+            continue;
         }
 
-        sectionData = sectionMap[tileSpec.layout.sectionId];
-
-        sectionData.minXList.push({"tileId": tileSpec.tileId, "value": tileSpec.minX});
-        sectionData.minYList.push({"tileId": tileSpec.tileId, "value": tileSpec.minY});
-
-        if ((typeof tileSpec.layout.imageRow !== 'undefined') &&
-            (typeof tileSpec.layout.imageCol !== 'undefined')) {
-            if (typeof firstRow === 'undefined') {
-                firstRow = tileSpec.layout.imageRow;
-                firstColumn = tileSpec.layout.imageCol;
-            } else {
-                firstRow = Math.min(firstRow, tileSpec.layout.imageRow);
-                firstColumn = Math.min(firstColumn, tileSpec.layout.imageCol);
-            }
+        if (! sectionToTileSpecsMap.hasOwnProperty(tileSpec.layout.sectionId)) {
+            sectionToTileSpecsMap[tileSpec.layout.sectionId] = [];
         }
 
-        if (this.tileId === tileSpec.tileId) {
-            originalTileWidth = tileSpec.width;
-            originalTileHeight = tileSpec.height;
-        }
+        sectionToTileSpecsMap[tileSpec.layout.sectionId].push(tileSpec);
 
-        sectionData.janeliaTiles[tileSpec.tileId] =
-                new JaneliaTile2(tileSpec, this.stackUrl, this.matchCollectionUrl, this.renderQueryParameters, this.scale, this.canvas, this.janeliaTileMap);
+        this.janeliaTileMap[tileSpec.tileId] =
+                new JaneliaTile2(tileSpec, this.stackUrl, this.matchCollectionUrl, this.renderQueryParameters,
+                                 this.scale, this.canvas, this.janeliaTileMap);
     }
 
-    var compareValues = function(a, b) {
-        return a.value - b.value;
-    };
+    let maxRow = 0;
+    let maxColumn = 0;
 
-    var deriveRowOrColumn = function(forTileId, list, size) {
-        var rowOrColumn = 0;
-        if ((list.length > 0) && (forTileId !== list[0].tileId)) {
-            for (var index = 1; index < list.length; index++) {
-                var prevDelta = list[index].value - list[index - 1].value;
-                if ((prevDelta / size) > 0.5) {
-                    rowOrColumn = rowOrColumn + 1;
-                }
-                if (forTileId === list[index].tileId) {
-                    break;
-                }
-            }
-        }
-        return rowOrColumn;
-    };
+    const sortedSectionIds = Object.keys(sectionToTileSpecsMap).sort();
 
-    var firstColumnForSection = 0;
-    var tileId;
-    var janeliaTile2;
+    let columnOffset = 0;
+    for (let i = 0; i < sortedSectionIds.length; i++) {
+        const sectionId = sortedSectionIds[i];
+        const sectionTileSpecs = sectionToTileSpecsMap[sectionId];
 
-    for (var sectionId in sectionMap) {
-        if (sectionMap.hasOwnProperty(sectionId)) {
-            sectionData = sectionMap[sectionId];
+        // TODO: consider saving orientation for later moves
 
-            sectionData.minXList.sort(compareValues);
-            sectionData.minYList.sort(compareValues);
+        const gridOrientation = new JaneliaGridOrientation(sectionTileSpecs,
+                                                           columnOffset);
 
-            for (tileId in sectionData.janeliaTiles) {
-                if (sectionData.janeliaTiles.hasOwnProperty(tileId)) {
+        maxRow = Math.max(maxRow, gridOrientation.maxViewRow);
+        maxColumn = Math.max(maxColumn, gridOrientation.maxViewColumn);
+        columnOffset = gridOrientation.maxViewColumn + 2;
 
-                    janeliaTile2 = sectionData.janeliaTiles[tileId];
-
-                    this.janeliaTileMap[tileId] = janeliaTile2;
-
-                    tileSpec = janeliaTile2.tileSpec;
-
-                    if (typeof firstRow === 'undefined') {
-                        janeliaTile2.setRowAndColumn(
-                                deriveRowOrColumn(tileId, sectionData.minYList, originalTileHeight),
-                                firstColumnForSection +
-                                deriveRowOrColumn(tileId, sectionData.minXList, originalTileWidth));
-                    } else {
-                        janeliaTile2.setRowAndColumn(
-                                tileSpec.layout.imageRow - firstRow,
-                                tileSpec.layout.imageCol - firstColumn);
-                    }
-                }
-            }
-            firstColumnForSection = firstColumnForSection + sectionData.minXList[sectionData.minXList.length - 1].value;
+        for (let j = 0; j < sectionTileSpecs.length; j++) {
+            const tileSpec = sectionTileSpecs[j];
+            const viewRowAndColumn = gridOrientation.getViewRowAndColumn(tileSpec);
+            const janeliaTile2 = this.janeliaTileMap[tileSpec.tileId];
+            janeliaTile2.setRowAndColumn(viewRowAndColumn.row, viewRowAndColumn.column);
         }
     }
+
+    const context = this.canvas.getContext("2d");
+    const canvasOffset = 4;
+    const tileMargin = 4;
+    // TODO: fix this for cases where tiles are different sizes and for non-FAFB tiles
+    const scaledWidth = 2760 * this.scale;
+    const scaledHeight = 2330 * this.scale;
+    const maxX = ((maxColumn + 1) * (scaledWidth + tileMargin)) + canvasOffset;
+    const maxY = ((maxRow + 1) * (scaledHeight + tileMargin)) + canvasOffset;
+
+    context.canvas.width = maxX;
+    context.canvas.height = maxY;
 
     // only load images (and then point matches) after rows and columns have been set for all tiles
-    for (tileId in this.janeliaTileMap) {
+    for (const tileId in this.janeliaTileMap) {
         if (this.janeliaTileMap.hasOwnProperty(tileId)) {
-            janeliaTile2 = this.janeliaTileMap[tileId];
+            const janeliaTile2 = this.janeliaTileMap[tileId];
             janeliaTile2.loadImage();
         }
     }
@@ -459,7 +563,9 @@ JaneliaTileWithNeighbors.prototype.drawMatch = function(matchIndexDelta) {
         var context = this.canvas.getContext("2d");
         context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // noinspection JSObjectNullOrUndefined
         pTile.drawLoadedImage();
+        // noinspection JSObjectNullOrUndefined
         qTile.drawLoadedImage();
 
         var matchCount = canvasMatches.matches.w.length;
@@ -556,10 +662,13 @@ JaneliaTileWithNeighbors.prototype.move = function(rowDelta, columnDelta) {
 
 JaneliaTileWithNeighbors.prototype.selectTile = function(canvasClickX, canvasClickY, shiftKey) {
 
-    var selectedTile = undefined;
+    const previouslySelectedTile = this.selectedTile;
+
+    this.selectedTile = undefined;
 
     if ((typeof this.tileId !== 'undefined') && (this.tileId.length > 0)) {
 
+        const unselectedTiles = [];
         for (var neighborTileId in this.janeliaTileMap) {
             if (this.janeliaTileMap.hasOwnProperty(neighborTileId)) {
                 var neighbor = this.janeliaTileMap[neighborTileId];
@@ -569,33 +678,62 @@ JaneliaTileWithNeighbors.prototype.selectTile = function(canvasClickX, canvasCli
                         var maxY = neighbor.y + neighbor.image.naturalHeight;
                         if ((maxX >= canvasClickX) && (maxY >= canvasClickY)) {
 
-                            if (! shiftKey) {
-                                neighbor.setSelected(true);
-                            }
-
-                            selectedTile = neighbor;
+                            this.selectedTile = neighbor;
 
                         } else {
-
-                            if (! shiftKey) {
-                                neighbor.setSelected(false);
-                            }
-
+                            unselectedTiles.push(neighbor);
                         }
                     } else {
-
-                        if (! shiftKey) {
-                            neighbor.setSelected(false);
-                        }
-
+                        unselectedTiles.push(neighbor);
                     }
                 }
             }
         }
 
+        const self = this;
+
+        if ((self.selectedTile !== undefined) && (! shiftKey)) {
+
+            const ctx = this.canvas.getContext("2d");
+            ctx.clearRect(0, 0, self.canvas.width, self.canvas.height);
+
+            self.selectedTile.drawLoadedImage();
+            self.selectedTile.drawMatchLines = false;
+
+            const selectedTileId = self.selectedTile.tileSpec.tileId;
+            unselectedTiles.forEach(tile => {
+                tile.drawLoadedImage();
+                tile.matches.forEach(canvasMatches => {
+                    if ((canvasMatches.pId === selectedTileId) || (canvasMatches.qId === selectedTileId)) {
+                        self.selectedTile.drawMatches(canvasMatches);
+                    }
+                });
+            });
+
+            self.selectedTile.matches.forEach(canvasMatches => {
+                self.selectedTile.drawMatches(canvasMatches)
+            });
+
+            self.selectedTile.setSelected(true);
+
+        } else if (previouslySelectedTile !== undefined) {
+
+            previouslySelectedTile.setSelected(false);
+            previouslySelectedTile.drawMatchLines = true;
+
+            unselectedTiles.forEach(tile => {
+                if (tile.tileSpec.tileId !== previouslySelectedTile.tileSpec.tileId) {
+                    tile.matches.forEach(canvasMatches => {
+                        tile.drawMatches(canvasMatches)
+                    });
+                }
+            });
+
+        }
+
     }
 
-    return selectedTile;
+    return this.selectedTile;
 };
 
 JaneliaTileWithNeighbors.prototype.getOrderedTileSpecPair = function(tileSpecA, tileSpecB) {
@@ -655,3 +793,116 @@ JaneliaTileWithNeighbors.prototype.deleteMatches = function(pairMatchesUrl) {
     }
     return false;
 };
+
+JaneliaTileWithNeighbors.prototype.runTrial = function(tileA, tileB, trialRunningSelector, errorMessageSelector) {
+
+    const orderedPair = this.getOrderedTileSpecPair(tileA.tileSpec, tileB.tileSpec);
+
+    const queryParameters = new JaneliaQueryParameters();
+    const trialSourceStack = queryParameters.get("trialSourceStack", "v12_acquire");
+
+    const baseRenderUrl = "http://renderer-dev.int.janelia.org:8080/render-ws/v1/owner/flyTEM/project/FAFB00/stack/" +
+                          trialSourceStack + "/tile/";
+    const renderUrlSuffix = "/render-parameters?excludeMask=true&normalizeForMatching=true&width=2760&height=2330&filter=true&scale=0.7";
+    const pRenderUrl = baseRenderUrl + orderedPair.pTileSpec.tileId + renderUrlSuffix;
+    const qRenderUrl = baseRenderUrl + orderedPair.qTileSpec.tileId + renderUrlSuffix;
+
+    let pClipPosition = "TOP";
+    let deltaX = orderedPair.qTileSpec.minX - orderedPair.pTileSpec.minX;
+    let deltaY = orderedPair.qTileSpec.minY - orderedPair.pTileSpec.minY;
+
+    // if layout info is available, use original row and column instead of potentially rotated stack positions
+    if (orderedPair.pTileSpec.layout && orderedPair.qTileSpec.layout) {
+        deltaX = orderedPair.qTileSpec.layout.imageCol - orderedPair.pTileSpec.layout.imageCol;
+        deltaY = orderedPair.qTileSpec.layout.imageRow - orderedPair.pTileSpec.layout.imageRow;
+    }
+    
+    // noinspection JSSuspiciousNameCombination
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        pClipPosition = deltaX > 0 ? "LEFT" : "RIGHT";
+    } else if (deltaY < 0) {
+        pClipPosition = "BOTTOM";
+    }
+    
+    const featureAndMatchParameters = {
+        "siftFeatureParameters": {
+            "fdSize": 4,
+            "minScale": 0.8,
+            "maxScale": 1.0,
+            "steps": 3
+        },
+        "matchDerivationParameters": {
+            "matchRod": 0.92,
+            "matchModelType": "TRANSLATION",
+            "matchIterations": 1000,
+            "matchMaxEpsilon": 7,
+            "matchMinInlierRatio": 0.0,
+            "matchMinNumInliers": 7,
+            "matchMaxTrust": 4,
+            "matchFilter": "SINGLE_SET"
+        },
+        "pClipPosition": pClipPosition,
+        "clipPixels": 600
+    };
+
+    const requestData = {
+        featureAndMatchParameters: featureAndMatchParameters,
+        pRenderParametersUrl: pRenderUrl,
+        qRenderParametersUrl: qRenderUrl
+    };
+
+    const matchTrialUrl = this.baseUrl + "/owner/" + this.owner + "/matchTrial";
+    const baseViewUrl = "http://renderer-dev.int.janelia.org:8080/render-ws/view/match-trial.html?matchTrialId=";
+    const viewParameters = "&scale=0.2&saveToCollection=" + this.matchCollection;
+
+    errorMessageSelector.text('');
+    trialRunningSelector.show();
+
+    $.ajax({
+               type: "POST",
+               headers: {
+                   'Accept': 'application/json',
+                   'Content-Type': 'application/json'
+               },
+               url: matchTrialUrl,
+               data: JSON.stringify(requestData),
+               cache: false,
+               success: function(data) {
+                   const matchTrialResultUrl = baseViewUrl + data.id + viewParameters;
+                   const win = window.open(matchTrialResultUrl);
+                   if (win) {
+                       win.focus();
+                   } else {
+                       alert('Please allow popups for this website');
+                   }
+                   trialRunningSelector.hide();
+               },
+               error: function(data, text, xhr) {
+                   console.log(xhr);
+                   errorMessageSelector.text(data.statusText + ': ' + data.responseText);
+                   trialRunningSelector.hide();
+               }
+           });
+
+};
+
+JaneliaTileWithNeighbors.prototype.toggleLinesAndPoints = function() {
+    this.drawMatchLines = ! this.drawMatchLines;
+    let neighborTileId;
+    for (neighborTileId in this.janeliaTileMap) {
+        if (this.janeliaTileMap.hasOwnProperty(neighborTileId)) {
+            let neighbor = this.janeliaTileMap[neighborTileId];
+            neighbor.drawMatchLines = this.drawMatchLines;
+        }
+    }
+
+    this.drawAllMatches();
+
+    const toggleLinesAndPointsSelector = $("#toggleLinesAndPoints");
+    if (this.drawMatchLines) {
+        toggleLinesAndPointsSelector.prop('value', 'Points')
+    } else {
+        toggleLinesAndPointsSelector.prop('value', 'Lines')
+    }
+};
+

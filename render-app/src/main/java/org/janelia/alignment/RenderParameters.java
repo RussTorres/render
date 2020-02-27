@@ -37,6 +37,7 @@ import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -572,7 +573,7 @@ public class RenderParameters implements Serializable {
         doFilter = (filter != null) && filter;
     }
 
-    public boolean isAddWarpFieldDebugOverlay() {
+    boolean isAddWarpFieldDebugOverlay() {
         return addWarpFieldDebugOverlay;
     }
 
@@ -639,6 +640,20 @@ public class RenderParameters implements Serializable {
     @SuppressWarnings("UnusedDeclaration")
     public void addTileSpecs(final Collection<TileSpec> tileSpec) {
         tileSpecs.addAll(tileSpec);
+    }
+
+    public void removeTileSpecsOutsideSet(final Set<String> tileIdsToKeep) {
+        final List<TileSpec> tileSpecsToKeep = new ArrayList<>(tileSpecs.size());
+        tileSpecs.forEach(ts -> {
+            if (tileIdsToKeep.contains(ts.getTileId())) {
+                tileSpecsToKeep.add(ts);
+            }
+        });
+        tileSpecs = tileSpecsToKeep;
+    }
+
+    public void sortTileSpecs(final Comparator<TileSpec> comparator) {
+        tileSpecs.sort(comparator);
     }
 
     public void flattenTransforms() {

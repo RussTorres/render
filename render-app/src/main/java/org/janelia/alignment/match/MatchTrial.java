@@ -116,15 +116,7 @@ public class MatchTrial implements Serializable {
         final MatchDerivationParameters matchDerivationParameters =
                 featureAndMatchParameters.getMatchDerivationParameters();
 
-        final CanvasFeatureMatcher matcher = new CanvasFeatureMatcher(matchDerivationParameters.matchRod,
-                                                                      matchDerivationParameters.matchModelType,
-                                                                      matchDerivationParameters.matchIterations,
-                                                                      matchDerivationParameters.matchMaxEpsilon,
-                                                                      matchDerivationParameters.matchMinInlierRatio,
-                                                                      matchDerivationParameters.matchMinNumInliers,
-                                                                      matchDerivationParameters.matchMaxTrust,
-                                                                      matchDerivationParameters.matchMaxNumInliers,
-                                                                      matchDerivationParameters.matchFilter);
+        final CanvasFeatureMatcher matcher = new CanvasFeatureMatcher(matchDerivationParameters);
 
         final CanvasFeatureMatchResult matchResult =
                 matcher.deriveMatchResult(pCanvasData.getFeatureList(), qCanvasData.getFeatureList());
@@ -141,14 +133,14 @@ public class MatchTrial implements Serializable {
                                                                              pCanvasId.getClipOffsets(),
                                                                              qCanvasId.getClipOffsets());
         this.matches = new ArrayList<>(results.size());
-        final List<Double> deltaXStandardDeviations = new ArrayList<>();
-        final List<Double> deltaYStandardDeviations = new ArrayList<>();
         for (final CanvasMatches canvasMatches : results) {
             final Matches m = canvasMatches.getMatches();
             this.matches.add(m);
-            deltaXStandardDeviations.add(m.calculateStandardDeviationForDeltaX());
-            deltaYStandardDeviations.add(m.calculateStandardDeviationForDeltaY());
         }
+
+        final PointMatchQualityStats pointMatchQualityStats = matchResult.calculateQualityStats();
+        final double[] aggregateDeltaXAndYStandardDeviation =
+                pointMatchQualityStats.getAggregateDeltaXAndYStandardDeviation();
 
         this.stats = new MatchTrialStats(pCanvasData.featureList.size(),
                                          (qFeatureStart - pFeatureStart),
@@ -156,8 +148,10 @@ public class MatchTrial implements Serializable {
                                          (matchStart - qFeatureStart),
                                          matchResult.getConsensusSetSizes(),
                                          (matchStop - matchStart),
-                                         deltaXStandardDeviations,
-                                         deltaYStandardDeviations);
+                                         aggregateDeltaXAndYStandardDeviation[0],
+                                         aggregateDeltaXAndYStandardDeviation[1],
+                                         pointMatchQualityStats.getConsensusSetDeltaXStandardDeviations(),
+                                         pointMatchQualityStats.getConsensusSetDeltaYStandardDeviations());
     }
 
     public String toJson() {

@@ -5,6 +5,7 @@ import com.beust.jcommander.ParametersDelegate;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -19,9 +20,11 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nonnull;
 
+import org.janelia.alignment.json.JsonUtils;
 import org.janelia.alignment.match.CanvasId;
 import org.janelia.alignment.match.CanvasMatches;
 import org.janelia.alignment.match.MatchCollectionMetaData;
@@ -35,6 +38,7 @@ import org.janelia.alignment.spec.TileBoundsRTree;
 import org.janelia.alignment.spec.TileSpec;
 import org.janelia.alignment.spec.stack.StackId;
 import org.janelia.alignment.util.FileUtil;
+import org.janelia.alignment.util.RenderWebServiceUrls;
 import org.janelia.render.client.parameter.CommandLineParameters;
 import org.janelia.render.client.parameter.LayerBoundsParameters;
 import org.janelia.render.client.parameter.RenderWebServiceParameters;
@@ -153,10 +157,21 @@ public class TilePairClient {
         )
         public String onlyIncludeTilesFromStack;
 
-        @Parameter(names = "--toJson", description = "JSON file where tile pairs are to be stored (.json, .gz, or .zip)", required = true)
+        @Parameter(
+                names = "--onlyIncludeTilesNearTileIdsJson",
+                description = "Path of JSON file containing array of source tile ids.  Only pairs for tiles near these tiles will be included (default is to include all nearby tiles)."
+        )
+        public String onlyIncludeTilesNearTileIdsJson;
+
+        @Parameter(
+                names = "--toJson",
+                description = "JSON file where tile pairs are to be stored (.json, .gz, or .zip)",
+                required = true)
         public String toJson;
 
-        @Parameter(names = "--maxPairsPerFile", description = "Maximum number of pairs to include in each file.")
+        @Parameter(
+                names = "--maxPairsPerFile",
+                description = "Maximum number of pairs to include in each file.")
         public Integer maxPairsPerFile = 100000;
 
         @ParametersDelegate
@@ -186,11 +201,8 @@ public class TilePairClient {
             return baseStack;
         }
 
-        String getExistingMatchOwner() {
-            if (existingMatchOwner == null) {
-                existingMatchOwner = renderWeb.owner;
-            }
-            return existingMatchOwner;
+        String getMatchOwner(final String explicitValue) {
+            return explicitValue == null ? renderWeb.owner : explicitValue;
         }
 
     }
@@ -229,12 +241,14 @@ public class TilePairClient {
     private final boolean filterTilesWithBox;
     private final RenderDataClient renderDataClient;
     private final RenderDataClient includeClient;
+    private final Set<String> sourceTileIds;
     private final StackId includeStack;
     private String outputFileNamePrefix;
     private String outputFileNameSuffix;
     private int numberOfOutputFiles;
 
-    TilePairClient(final Parameters parameters) throws IllegalArgumentException {
+    TilePairClient(final Parameters parameters)
+            throws IllegalArgumentException, IOException {
 
         this.parameters = parameters;
         this.filterTilesWithBox = (parameters.bounds.minX != null);
@@ -256,6 +270,16 @@ public class TilePairClient {
             includeClient = new RenderDataClient(parameters.renderWeb.baseDataUrl,
                                                  includeStack.getOwner(),
                                                  includeStack.getProject());
+        }
+
+        if (parameters.onlyIncludeTilesNearTileIdsJson != null) {
+            final JsonUtils.Helper<String> jsonHelper = new JsonUtils.Helper<>(String.class);
+            try (final Reader reader = FileUtil.DEFAULT_INSTANCE.getExtensionBasedReader(parameters.onlyIncludeTilesNearTileIdsJson)) {
+                this.sourceTileIds = new HashSet<>(jsonHelper.fromJsonArray(reader));
+            }
+            LOG.info("loadTileIds: loaded {} tile ids from {}", this.sourceTileIds.size(), parameters.onlyIncludeTilesNearTileIdsJson);
+        } else {
+            this.sourceTileIds = null;
         }
 
         this.outputFileNamePrefix = parameters.toJson;
@@ -316,9 +340,10 @@ public class TilePairClient {
         if (parameters.excludePairsInMatchCollection != null) {
 
             final String collectionName = parameters.excludePairsInMatchCollection;
-            final RenderDataClient matchDataClient = new RenderDataClient(parameters.renderWeb.baseDataUrl,
-                                                                          parameters.getExistingMatchOwner(),
-                                                                          collectionName);
+            final RenderDataClient matchDataClient =
+                    new RenderDataClient(parameters.renderWeb.baseDataUrl,
+                                         parameters.getMatchOwner(parameters.existingMatchOwner),
+                                         collectionName);
 
             final List<MatchCollectionMetaData> matchCollections = matchDataClient.getOwnerMatchCollections();
             final boolean foundCollection = matchCollections.stream()
@@ -388,7 +413,17 @@ public class TilePairClient {
 
             currentZTree = zToTreeMap.get(z);
 
-            currentNeighborPairs = currentZTree.getCircleNeighbors(neighborTreeList,
+            final List<TileBounds> sourceTileBoundsList;
+            if (sourceTileIds == null) {
+                sourceTileBoundsList = currentZTree.getTileBoundsList();
+            } else {
+                sourceTileBoundsList = currentZTree.getTileBoundsList().stream()
+                        .filter(tb -> sourceTileIds.contains(tb.getTileId()))
+                        .collect(Collectors.toList());
+            }
+
+            currentNeighborPairs = currentZTree.getCircleNeighbors(sourceTileBoundsList,
+                                                                   neighborTreeList,
                                                                    parameters.xyNeighborFactor,
                                                                    parameters.explicitRadius,
                                                                    parameters.excludeCornerNeighbors,
@@ -587,15 +622,27 @@ public class TilePairClient {
                 throws IOException {
 
             final List<String> groupIds = zToSectionIdMap.get(z);
+            Integer matchCount;
             if (groupIds != null) {
                 for (final String pGroupId : groupIds) {
-                    for (final CanvasMatches canvasMatches : matchDataClient.getMatchesWithPGroupId(pGroupId)) {
-                        if (canvasMatches.size() > parameters.minExistingMatchCount) {
-                            existingPairs.add(
-                                    new OrderedCanvasIdPair(
-                                            new CanvasId(canvasMatches.getpGroupId(), canvasMatches.getpId()),
-                                            new CanvasId(canvasMatches.getqGroupId(), canvasMatches.getqId())));
+                    for (final CanvasMatches canvasMatches : matchDataClient.getMatchesWithPGroupId(pGroupId, true)) {
+
+                        final OrderedCanvasIdPair pair =  new OrderedCanvasIdPair(
+                                new CanvasId(canvasMatches.getpGroupId(), canvasMatches.getpId()),
+                                new CanvasId(canvasMatches.getqGroupId(), canvasMatches.getqId()));
+
+                        matchCount = canvasMatches.getMatchCount();
+
+                        if (parameters.minExistingMatchCount == 0) {
+                            existingPairs.add(pair);
+                        } else if (matchCount == null) {
+                            throw new IOException("match collection " + parameters.excludePairsInMatchCollection +
+                                                  " is missing newer matchCount field which is required " +
+                                                  "for the --minExistingMatchCount option");
+                        } else if (matchCount > parameters.minExistingMatchCount) {
+                            existingPairs.add(pair);
                         }
+
                     }
                 }
             }

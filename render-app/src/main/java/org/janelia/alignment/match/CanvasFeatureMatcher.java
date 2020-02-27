@@ -12,6 +12,7 @@ import mpicbg.models.NotEnoughDataPointsException;
 import mpicbg.models.PointMatch;
 import mpicbg.util.Timer;
 
+import org.janelia.alignment.match.parameters.MatchDerivationParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +41,8 @@ public class CanvasFeatureMatcher implements Serializable {
 
     private final float rod;
     private final ModelType modelType;
+    private final ModelType regularizerModelType;
+    private final Double interpolatedModelLambda;
     private final int iterations;
     private final float maxEpsilon;
     private final float minInlierRatio;
@@ -50,35 +53,23 @@ public class CanvasFeatureMatcher implements Serializable {
 
     /**
      * Sets up everything that is needed to derive point matches from the feature lists of two canvases.
-     *
-     * @param  rod             ratio of distances (e.g. 0.92f).
-     * @param  modelType       type of model to use for filter.
-     * @param  iterations      filter iterations (e.g. 1000).
-     * @param  maxEpsilon      minimal allowed transfer error (e.g. 20.0f).
-     * @param  minInlierRatio  minimal ratio of inliers to candidates (e.g. 0.0f).
-     * @param  minNumInliers   minimal absolute number of inliers for matches (e.g. 10).
-     * @param  maxTrust        reject candidates with a cost larger than maxTrust * median cost (e.g. 3).
-     * @param  maxNumInliers   (optional) maximum number of inliers for matches; null indicates no maximum.
-     * @param  filterType      type of match filtering.
      */
-    public CanvasFeatureMatcher(final float rod,
-                                final ModelType modelType,
-                                final int iterations,
-                                final float maxEpsilon,
-                                final float minInlierRatio,
-                                final int minNumInliers,
-                                final double maxTrust,
-                                final Integer maxNumInliers,
-                                final FilterType filterType) {
-        this.rod = rod;
-        this.modelType = modelType;
-        this.iterations = iterations;
-        this.maxEpsilon = maxEpsilon;
-        this.minInlierRatio = minInlierRatio;
-        this.minNumInliers = minNumInliers;
-        this.maxTrust = maxTrust;
-        this.maxNumInliers = maxNumInliers;
-        this.filterType = filterType;
+    public CanvasFeatureMatcher(final MatchDerivationParameters matchParameters) {
+        this.rod = matchParameters.matchRod;
+        this.modelType = matchParameters.matchModelType;
+        this.regularizerModelType = matchParameters.matchRegularizerModelType;
+        this.interpolatedModelLambda = matchParameters.matchInterpolatedModelLambda;
+        this.iterations = matchParameters.matchIterations;
+        this.maxEpsilon = matchParameters.matchMaxEpsilon;
+        this.minInlierRatio = matchParameters.matchMinInlierRatio;
+        this.minNumInliers = matchParameters.matchMinNumInliers;
+        this.maxTrust = matchParameters.matchMaxTrust;
+        this.maxNumInliers = matchParameters.matchMaxNumInliers;
+        this.filterType = matchParameters.matchFilter;
+    }
+
+    FilterType getFilterType() {
+        return filterType;
     }
 
     /**
@@ -96,7 +87,7 @@ public class CanvasFeatureMatcher implements Serializable {
         final Timer timer = new Timer();
         timer.start();
 
-        final Model model = modelType.getInstance();
+        final Model model = getModel();
         final List<PointMatch> candidates = new ArrayList<>(canvas1Features.size());
 
         FeatureTransform.matchFeatures(canvas1Features, canvas2Features, candidates, rod);
@@ -104,21 +95,21 @@ public class CanvasFeatureMatcher implements Serializable {
         CanvasFeatureMatchResult result = null;
         switch (filterType) {
             case NONE:
-                result = new CanvasFeatureMatchResult(Collections.singletonList(candidates), candidates.size());
+                result = new CanvasFeatureMatchResult(this, Collections.singletonList(candidates), candidates.size());
                 break;
             case SINGLE_SET:
                 final List<PointMatch> inliers = filterMatches(candidates, model);
-                result = new CanvasFeatureMatchResult(Collections.singletonList(inliers), candidates.size());
+                result = new CanvasFeatureMatchResult(this, Collections.singletonList(inliers), candidates.size());
                 break;
             case CONSENSUS_SETS:
                 final List<List<PointMatch>> consensusMatches = filterConsensusMatches(candidates);
-                result = new CanvasFeatureMatchResult(consensusMatches, candidates.size());
+                result = new CanvasFeatureMatchResult(this, consensusMatches, candidates.size());
                 break;
             case AGGREGATED_CONSENSUS_SETS:
                 final List<PointMatch> aggregatedMatches = new ArrayList<>(candidates.size());
                 filterConsensusMatches(candidates).forEach(aggregatedMatches::addAll);
 
-                result = new CanvasFeatureMatchResult(Collections.singletonList(aggregatedMatches), candidates.size());
+                result = new CanvasFeatureMatchResult(this, Collections.singletonList(aggregatedMatches), candidates.size());
                 break;
         }
 
@@ -172,7 +163,7 @@ public class CanvasFeatureMatcher implements Serializable {
 
         boolean modelFound;
         do {
-            final Model model = modelType.getInstance();
+            final Model model = getModel();
             final List<PointMatch> modelInliers = new ArrayList<>();
             try {
                 modelFound = model.filterRansac(candidates,
@@ -214,6 +205,19 @@ public class CanvasFeatureMatcher implements Serializable {
                  processedListOfInliersLists.size(), consensusSetSizes, totalNumberOfInliers, totalNumberOfCandidates);
 
         return processedListOfInliersLists;
+    }
+
+    /**
+     * @return model instance for match filtering.
+     */
+    public Model getModel() {
+        final Model model;
+        if (interpolatedModelLambda == null) {
+            model = modelType.getInstance();
+        } else {
+            model = modelType.getInterpolatedInstance(regularizerModelType, interpolatedModelLambda);
+        }
+        return model;
     }
 
     private void postProcessInliers(final List<PointMatch> inliers) {

@@ -8,55 +8,76 @@
 
     <script type="text/javascript" src="../script/jquery-2.1.1.min.js"></script>
     <script type="text/javascript" src="../script/janelia-render.js?v=20180904_001"></script>
-    <script type="text/javascript" src="../script/janelia-match-trial.js?v=20180904_001"></script>
+    <script type="text/javascript" src="../script/janelia-match-trial.js?v=20191025_003"></script>
     <script type="text/javascript">
 
+        // TODO: figure out why matchTrial needs to be a var for initNewTrialWindow to work
+        // noinspection ES6ConvertVarToLetConst
         var matchTrial;
 
         $( document ).ready(function() {
 
-            var util = new JaneliaScriptUtilities();
-            var queryParameters = new JaneliaQueryParameters();
+            const util = new JaneliaScriptUtilities();
+            const queryParameters = new JaneliaQueryParameters();
 
-            var baseUrl = util.getServicesBaseUrl();
+            const baseUrl = util.getServicesBaseUrl();
 
             // TODO: remove this when done debugging on localhost
             // baseUrl = "http://renderer-dev:8080/render-ws/v1";
 
-            var owner = 'flyTEM';
+            const owner = 'flyTEM';
 
-            var viewScale = queryParameters.get('viewScale', 1.0);
+            // changed query parameter to 'scale' from 'viewScale' to better handle old URLs with viewScale=1.0
+            const viewScale = queryParameters.get('scale', 0.2);
 
-            var canvas = document.getElementById("theCanvas");
+            const canvas = document.getElementById("theCanvas");
 
             matchTrial = new JaneliaMatchTrial(baseUrl, owner, canvas, viewScale);
 
-            var matchTrialId = queryParameters.get('matchTrialId', 'TBD');
+            const matchTrialId = queryParameters.get('matchTrialId', 'TBD');
 
-            var newTrialButtonSelector = $('#newTrial');
-            var trialRunningSelector = $('#trialRunning');
+            const newTrialButtonSelector = $('#newTrial');
+            const trialRunningSelector = $('#trialRunning');
             trialRunningSelector.hide();
-            
+
+            const errorMessageSelector = $('#message');
+            const saveToCollectionButtonSelector = $('#saveToCollection');
+
+            const saveToOwner = queryParameters.get("saveToOwner", "flyTEM");
+            const saveToCollection = queryParameters.get("saveToCollection");
+            if (typeof saveToCollection === 'undefined') {
+                saveToCollectionButtonSelector.hide();
+            } else {
+                saveToCollectionButtonSelector.val("Save To " + saveToCollection);
+                saveToCollectionButtonSelector.on('click', function() {
+                    matchTrial.saveTrialResultsToCollection(saveToOwner, saveToCollection, errorMessageSelector);
+                });
+            }
+
             if (matchTrialId === 'TBD') {
                 newTrialButtonSelector.hide();
                 $('#headerDiv').hide();
 
-                var pRenderParametersUrl = queryParameters.get('pRenderParametersUrl');
+                const pRenderParametersUrl = queryParameters.get('pRenderParametersUrl');
                 if (typeof pRenderParametersUrl !== 'undefined') {
                     $('#pRenderParametersUrl').val(pRenderParametersUrl);
                 }
 
-                var qRenderParametersUrl = queryParameters.get('qRenderParametersUrl');
+                const qRenderParametersUrl = queryParameters.get('qRenderParametersUrl');
                 if (typeof qRenderParametersUrl !== 'undefined') {
                     $('#qRenderParametersUrl').val(qRenderParametersUrl);
                 }
 
             } else {
                 $('#formDiv').hide();
-                var trialSuffix = matchTrialId.substring(matchTrialId.length - 7);
+                const trialSuffix = matchTrialId.substring(matchTrialId.length - 7);
                 $(document).attr('title', 'Match Trial ' + trialSuffix);
-                var trialDataUrl = matchTrial.matchTrialUrl + '/' + matchTrialId;
+                const trialDataUrl = matchTrial.matchTrialUrl + '/' + matchTrialId;
                 $('#trialId').html('<a target="_blank" href="' + trialDataUrl + '">' + trialSuffix + '</a>');
+
+                const matchTrialDate = new Date(parseInt(matchTrialId.substring(0, 8), 16) * 1000);
+                $('#trialStartTime').html(matchTrialDate.toLocaleString());
+
                 matchTrial.loadTrial(matchTrialId);
             }
 
@@ -64,9 +85,9 @@
                 matchTrial.openNewTrialWindow();
             });
 
-            var runTrialButtonSelector = $('#runTrial');
+            const runTrialButtonSelector = $('#runTrial');
             runTrialButtonSelector.on('click', function() {
-                matchTrial.runTrial(runTrialButtonSelector, trialRunningSelector, $('#message'));
+                matchTrial.runTrial(runTrialButtonSelector, trialRunningSelector, errorMessageSelector);
             });
 
         });
@@ -76,7 +97,11 @@
 </head>
 <body>
 
-<h3>Match Trial <span id="trialId"></span> <input id="newTrial" type="button" style="margin-left:40px" value="Edit Parameters"></h3>
+<h3>
+    Match Trial <span id="trialId"></span>
+    <input id="newTrial" type="button" style="margin-left:40px" value="Create New Trial">
+    <input id="saveToCollection" type="button" style="margin-left:40px" value="Save To Collection">
+</h3>
 
 <span id="message" class="error"></span>
 
@@ -107,15 +132,30 @@
                         <option>TRANSLATION</option>
                     </select>
                 </label>
-                <label>ROD: <input id="matchRod" type="number" step="0.01" min="0.0" max="1.0" value="0.95" required></label>
-                <label>iterations: <input id="matchIterations" type="number" min="1" max="10000" value="1000" required></label>
-                <label>maxEpsilon: <input id="matchMaxEpsilon" type="number" step="0.1" min="0.0" max="100.0" value="5.0" required></label>
+                <label>regularizerModelType:
+                    <select id="matchRegularizerModelType" required>
+                        <option>NOT INTERPOLATED</option>
+                        <option>AFFINE</option>
+                        <option>RIGID</option>
+                        <option>SIMILARITY</option>
+                        <option>TRANSLATION</option>
+                    </select>
+                </label>
+                <label>interpolatedModelLambda: <input id="matchInterpolatedModelLambda" type="number" step="0.01" min="0.0" max="1.0"></label>
             </td>
         </tr>
         <tr>
             <td></td>
             <td>
+                <label>ROD: <input id="matchRod" type="number" step="0.01" min="0.0" max="1.0" value="0.95" required></label>
+                <label>iterations: <input id="matchIterations" type="number" min="1" max="10000" value="1000" required></label>
+                <label>maxEpsilon: <input id="matchMaxEpsilon" type="number" step="0.1" min="0.0" max="100.0" value="5.0" required></label>
                 <label>minInlierRatio: <input id="matchMinInlierRatio" type="number" step="0.01" min="0.0" max="1.0" value="0.0" required></label>
+            </td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>
                 <label>minNumInliers: <input id="matchMinNumInliers" type="number" min="0" max="1000" value="8" required></label>
                 <label>maxTrust: <input id="matchMaxTrust" type="number" step="0.1" min="0.0" max="100.0" value="30.0" required></label>
                 <label>filter:
@@ -163,11 +203,16 @@
 <div id="headerDiv" class="header_div">
     <table class="data_table">
         <tr>
+            <td>Summary:</td>
+            <td colspan="4">started at <span id="trialStartTime"></span><span id="trialElapsedMessage"></span></td>
+        </tr>
+        <tr>
             <td colspan="4"><hr/></td>
         </tr>
         <tr>
             <td>SIFT Feature Parameters:</td>
             <td colspan="4">
+                renderScale: <span id="trialRenderScale" class="parameterValue"></span>
                 fdSize: <span id="trialFdSize" class="parameterValue"></span>
                 minScale: <span id="trialMinScale" class="parameterValue"></span>
                 maxScale: <span id="trialMaxScale" class="parameterValue"></span>
@@ -178,27 +223,27 @@
             <td>Match Parameters:</td>
             <td colspan="4">
                 modelType: <span id="trialMatchModelType" class="parameterValue"></span>
-                ROD: <span id="trialMatchRod" class="parameterValue"></span>
-                iterations: <span id="trialMatchIterations" class="parameterValue"></span>
-                maxEpsilon: <span id="trialMatchMaxEpsilon" class="parameterValue"></span>
+                <span id="trialInterpolatedModelFields"></span>
             </td>
         </tr>
         <tr>
             <td></td>
             <td colspan="4">
+                ROD: <span id="trialMatchRod" class="parameterValue"></span>
+                iterations: <span id="trialMatchIterations" class="parameterValue"></span>
+                maxEpsilon: <span id="trialMatchMaxEpsilon" class="parameterValue"></span>
                 minInlierRatio: <span id="trialMatchMinInlierRatio" class="parameterValue"></span>
+            </td>
+        </tr>
+        <tr>
+            <td></td>
+            <td colspan="4">
                 minNumInliers: <span id="trialMatchMinNumInliers" class="parameterValue"></span>
                 maxTrust: <span id="trialMatchMaxTrust" class="parameterValue"></span>
                 filter: <span id="trialMatchFilter" class="parameterValue"></span>
             </td>
         </tr>
-        <tr>
-            <td>Clip Parameters:</td>
-            <td colspan="4">
-                pRelativePosition: <span id="trialPClipPosition" class="parameterValue"></span>
-                clipPixels: <span id="trialClipPixels" class="parameterValue"></span>
-            </td>
-        </tr>
+        <tr id="trialClipRow"></tr>
         <tr>
             <td>P Render Parameters URL:</td>
             <td id="trialpRenderParametersUrl"></td>
@@ -224,6 +269,7 @@
                 <input type='button' value='All Matches' onclick='matchTrial.drawAllMatches()' />
                 <input type='button' value='Previous Match' onclick='matchTrial.drawSelectedMatches(-1)' />
                 <input type='button' value='Next Match' onclick='matchTrial.drawSelectedMatches(1)' />
+                <input id='toggleLinesAndPoints' type='button' value='Lines' onclick='matchTrial.toggleLinesAndPoints()' />
             </td>
             <td id="matchInfo" colspan="3"></td>
         </tr>

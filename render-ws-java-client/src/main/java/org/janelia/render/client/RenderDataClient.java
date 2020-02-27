@@ -37,6 +37,7 @@ import org.janelia.alignment.spec.stack.StackId;
 import org.janelia.alignment.spec.stack.StackMetaData;
 import org.janelia.alignment.spec.stack.StackVersion;
 import org.janelia.alignment.transform.ConsensusWarpFieldBuilder;
+import org.janelia.alignment.util.RenderWebServiceUrls;
 import org.janelia.alignment.util.ZFilter;
 import org.janelia.render.client.request.WaitingRetryHandler;
 import org.janelia.render.client.response.EmptyResponseHandler;
@@ -72,6 +73,10 @@ public class RenderDataClient {
         this.project = project;
         this.urls = new RenderWebServiceUrls(baseDataUrl, owner, project);
         this.httpClient = HttpClientBuilder.create().setRetryHandler(new WaitingRetryHandler()).build();
+    }
+
+    public RenderWebServiceUrls getUrls() {
+        return urls;
     }
 
     @Override
@@ -1143,26 +1148,62 @@ public class RenderDataClient {
     }
 
     /**
-     * @param  pGroupId      pGroupId (usually the section id).
      *
-     * @return list of canvas matches with the specified pGroupId.
+     * @param pGroupId  first tile's section id.
+     * @param pId       first tile's id.
+     * @param qGroupId  second tile's section id.
+     * @param qId       second tile's id.
+     *
+     * @return canvas matches between the specified tiles.
      *
      * @throws IOException
      *   if the request fails for any reason.
      */
-    public List<CanvasMatches> getMatchesWithPGroupId(final String pGroupId)
+    public CanvasMatches getMatchesBetweenTiles(final String pGroupId,
+                                                final String pId,
+                                                final String qGroupId,
+                                                final String qId)
             throws IOException {
 
-        final URI uri = getUri(urls.getMatchesWithPGroupIdUrlString(pGroupId));
+        final String urlString = String.format("%s/group/%s/id/%s/matchesWith/%s/id/%s",
+                                               urls.getMatchCollectionUrlString(), pGroupId, pId, qGroupId, qId);
+        final URI uri = getUri(urlString);
         final HttpGet httpGet = new HttpGet(uri);
         final String requestContext = "GET " + uri;
         final TypeReference<List<CanvasMatches>> typeReference = new TypeReference<List<CanvasMatches>>() {};
         final JsonUtils.GenericHelper<List<CanvasMatches>> helper = new JsonUtils.GenericHelper<>(typeReference);
         final JsonResponseHandler<List<CanvasMatches>> responseHandler = new JsonResponseHandler<>(requestContext, helper);
 
-        LOG.info("getMatchesWithPGroupId: submitting {}", requestContext);
+        LOG.info("getMatchesBetweenTiles: submitting {}", requestContext);
 
-        return httpClient.execute(httpGet, responseHandler);
+        final List<CanvasMatches> responseList = httpClient.execute(httpGet, responseHandler);
+
+        CanvasMatches canvasMatches = null;
+        if (responseList.size() == 1) {
+            canvasMatches = responseList.get(0);
+        } else if (responseList.size() > 1) {
+            throw new IOException(responseList.size() + " match records returned for pId " + pId +
+                                  " and qId " + qId + " when there should only be one record");
+        }
+
+        return canvasMatches;
+    }
+
+    /**
+     * @param  pGroupId             pGroupId (usually the section id).
+     * @param  excludeMatchDetails  if true, only retrieve pair identifiers and exclude detailed match points.
+     *
+     * @return list of canvas matches with the specified pGroupId.
+     *
+     * @throws IOException
+     *   if the request fails for any reason.
+     */
+    public List<CanvasMatches> getMatchesWithPGroupId(final String pGroupId,
+                                                      final boolean excludeMatchDetails)
+            throws IOException {
+        return getMatches("getMatchesWithPGroupId",
+                          urls.getMatchesWithPGroupIdUrlString(pGroupId),
+                          excludeMatchDetails);
     }
 
     /**
@@ -1176,17 +1217,26 @@ public class RenderDataClient {
      */
     public List<CanvasMatches> getMatchesOutsideGroup(final String groupId)
             throws IOException {
+        return getMatchesOutsideGroup(groupId, false);
+    }
 
-        final URI uri = getUri(urls.getMatchesOutsideGroupUrlString(groupId));
-        final HttpGet httpGet = new HttpGet(uri);
-        final String requestContext = "GET " + uri;
-        final TypeReference<List<CanvasMatches>> typeReference = new TypeReference<List<CanvasMatches>>() {};
-        final JsonUtils.GenericHelper<List<CanvasMatches>> helper = new JsonUtils.GenericHelper<>(typeReference);
-        final JsonResponseHandler<List<CanvasMatches>> responseHandler = new JsonResponseHandler<>(requestContext, helper);
+    /**
+     * @param  groupId              groupId (usually the section id).
+     * @param  excludeMatchDetails  if true, only retrieve pair identifiers and exclude detailed match points.
+     *
+     * @return list of canvas matches between the specified groupId
+     *         and all other canvases that have a different groupId.
+     *
+     * @throws IOException
+     *   if the request fails for any reason.
+     */
+    public List<CanvasMatches> getMatchesOutsideGroup(final String groupId,
+                                                      final boolean excludeMatchDetails)
+            throws IOException {
 
-        LOG.info("getMatchesOutsideGroup: submitting {}", requestContext);
-
-        return httpClient.execute(httpGet, responseHandler);
+        return getMatches("getMatchesOutsideGroup",
+                          urls.getMatchesOutsideGroupUrlString(groupId),
+                          excludeMatchDetails);
     }
 
     /**
@@ -1200,17 +1250,26 @@ public class RenderDataClient {
      */
     public List<CanvasMatches> getMatchesWithinGroup(final String groupId)
             throws IOException {
+        return getMatchesWithinGroup(groupId, false);
+    }
 
-        final URI uri = getUri(urls.getMatchesWithinGroupUrlString(groupId));
-        final HttpGet httpGet = new HttpGet(uri);
-        final String requestContext = "GET " + uri;
-        final TypeReference<List<CanvasMatches>> typeReference = new TypeReference<List<CanvasMatches>>() {};
-        final JsonUtils.GenericHelper<List<CanvasMatches>> helper = new JsonUtils.GenericHelper<>(typeReference);
-        final JsonResponseHandler<List<CanvasMatches>> responseHandler = new JsonResponseHandler<>(requestContext, helper);
+    /**
+     * @param  groupId              groupId (usually the section id).
+     * @param  excludeMatchDetails  if true, only retrieve pair identifiers and exclude detailed match points.
+     *
+     * @return list of canvas matches between the specified groupId
+     *         and all other canvases that have the same groupId.
+     *
+     * @throws IOException
+     *   if the request fails for any reason.
+     */
+    public List<CanvasMatches> getMatchesWithinGroup(final String groupId,
+                                                     final boolean excludeMatchDetails)
+            throws IOException {
 
-        LOG.info("getMatchesWithinGroup: submitting {}", requestContext);
-
-        return httpClient.execute(httpGet, responseHandler);
+        return getMatches("getMatchesWithinGroup",
+                          urls.getMatchesWithinGroupUrlString(groupId),
+                          excludeMatchDetails);
     }
 
     /**
@@ -1428,6 +1487,33 @@ public class RenderDataClient {
         if (value != null) {
             uriBuilder.addParameter(name, String.valueOf(value));
         }
+    }
+
+    private List<CanvasMatches> getMatches(final String context,
+                                           final String urlString,
+                                           final boolean excludeMatchDetails)
+            throws IOException {
+        final URI uri;
+        try {
+            final URIBuilder builder = new URIBuilder(urlString);
+            if (excludeMatchDetails) {
+                builder.addParameter("excludeMatchDetails", String.valueOf(excludeMatchDetails));
+            }
+            uri = builder.build();
+        } catch (final URISyntaxException e) {
+            throw new IOException(e.getMessage(), e);
+        }
+
+        final HttpGet httpGet = new HttpGet(uri);
+        final String requestContext = "GET " + uri;
+        final TypeReference<List<CanvasMatches>> typeReference = new TypeReference<List<CanvasMatches>>() {};
+        final JsonUtils.GenericHelper<List<CanvasMatches>> helper = new JsonUtils.GenericHelper<>(typeReference);
+        final JsonResponseHandler<List<CanvasMatches>> responseHandler = new JsonResponseHandler<>(requestContext,
+                                                                                                   helper);
+
+        LOG.info(context + ": submitting {}", requestContext);
+
+        return httpClient.execute(httpGet, responseHandler);
     }
 
     private static final Logger LOG = LoggerFactory.getLogger(RenderDataClient.class);
